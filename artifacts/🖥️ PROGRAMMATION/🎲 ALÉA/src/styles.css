@@ -1,0 +1,79 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme {
+  --color-background: #0c0c0b;
+  --color-foreground: #eceae4;
+  --color-card: #161614;
+  --color-card-foreground: #eceae4;
+  --color-muted: #1c1c19;
+  --color-muted-foreground: #9a9890;
+  --color-primary: #c8c4ba;
+  --color-primary-foreground: #0c0c0b;
+  --color-secondary: #1c1c19;
+  --color-secondary-foreground: #eceae4;
+  --color-accent: #22221e;
+  --color-accent-foreground: #eceae4;
+  --color-border: #2a2a26;
+  --color-input: #2a2a26;
+  --color-ring: #c8c4ba;
+  --color-destructive: #b54a3c;
+  --color-destructive-foreground: #eceae4;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius: 12px;
+  --font-sans: "Figtree", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fraunces", ui-serif, Georgia, "Times New Roman", serif;
+  --animate-dice-spin: dice-spin 700ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html,
+  body {
+    background: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    min-height: 100%;
+  }
+
+  body {
+    background-image: radial-gradient(
+      ellipse 80% 50% at 50% -10%,
+      color-mix(in oklab, var(--color-foreground) 6%, transparent),
+      transparent 55%
+    );
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@keyframes dice-spin {
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+  35% {
+    transform: rotate(140deg) scale(0.92);
+  }
+  100% {
+    transform: rotate(360deg) scale(1);
+  }
+}

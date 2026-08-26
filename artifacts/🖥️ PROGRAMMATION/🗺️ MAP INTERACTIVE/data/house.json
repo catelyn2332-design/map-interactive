@@ -1,0 +1,287 @@
+{
+  "floors": [
+    "parcelle",
+    "cave",
+    "rdc",
+    "etage",
+    "combles",
+    "toit"
+  ],
+  "rooms": [
+    {
+      "id": "vue-mer",
+      "floorId": "parcelle",
+      "name": "Versant mer"
+    },
+    {
+      "id": "vue-montagnes",
+      "floorId": "parcelle",
+      "name": "Versant montagnes"
+    },
+    {
+      "id": "chemin-colline",
+      "floorId": "parcelle",
+      "name": "Chemin de colline"
+    },
+    {
+      "id": "jardin-friche",
+      "floorId": "parcelle",
+      "name": "Jardin en friche"
+    },
+    {
+      "id": "potager",
+      "floorId": "parcelle",
+      "name": "Potager"
+    },
+    {
+      "id": "bucher",
+      "floorId": "parcelle",
+      "name": "Bûcher"
+    },
+    {
+      "id": "citerne-ext",
+      "floorId": "parcelle",
+      "name": "Citerne de pluie"
+    },
+    {
+      "id": "porche",
+      "floorId": "parcelle",
+      "name": "Porche sud"
+    },
+    {
+      "id": "maison-empreinte",
+      "floorId": "parcelle",
+      "name": "Emprise de la maison"
+    },
+    {
+      "id": "escalier-cave",
+      "floorId": "cave",
+      "name": "Escalier de pierre"
+    },
+    {
+      "id": "couloir-pierre",
+      "floorId": "cave",
+      "name": "Couloir de pierre"
+    },
+    {
+      "id": "cave-provisions",
+      "floorId": "cave",
+      "name": "Cave à provisions"
+    },
+    {
+      "id": "cave-vin",
+      "floorId": "cave",
+      "name": "Cave à vin abandonnée"
+    },
+    {
+      "id": "atelier-cave",
+      "floorId": "cave",
+      "name": "Atelier de bricolage"
+    },
+    {
+      "id": "chaufferie",
+      "floorId": "cave",
+      "name": "Chaufferie"
+    },
+    {
+      "id": "citernes",
+      "floorId": "cave",
+      "name": "Salle des citernes"
+    },
+    {
+      "id": "chambre-scellee",
+      "floorId": "cave",
+      "name": "Chambre scellée"
+    },
+    {
+      "id": "tour-rdc",
+      "floorId": "rdc",
+      "name": "Tourelle — pied"
+    },
+    {
+      "id": "veranda-ouest",
+      "floorId": "rdc",
+      "name": "Véranda ouest"
+    },
+    {
+      "id": "bibliotheque",
+      "floorId": "rdc",
+      "name": "Bibliothèque"
+    },
+    {
+      "id": "atelier-enfants",
+      "floorId": "rdc",
+      "name": "Atelier des enfants"
+    },
+    {
+      "id": "cabinet-myriam",
+      "floorId": "rdc",
+      "name": "Cabinet de Myriam"
+    },
+    {
+      "id": "couloir-portraits",
+      "floorId": "rdc",
+      "name": "Couloir des portraits"
+    },
+    {
+      "id": "parlor",
+      "floorId": "rdc",
+      "name": "Salon du piano"
+    },
+    {
+      "id": "salon",
+      "floorId": "rdc",
+      "name": "Salon"
+    },
+    {
+      "id": "hall",
+      "floorId": "rdc",
+      "name": "Hall d’entrée"
+    },
+    {
+      "id": "escalier-rdc",
+      "floorId": "rdc",
+      "name": "Grand escalier"
+    },
+    {
+      "id": "salle-a-manger",
+      "floorId": "rdc",
+      "name": "Salle à manger"
+    },
+    {
+      "id": "cuisine",
+      "floorId": "rdc",
+      "name": "Cuisine"
+    },
+    {
+      "id": "wc-rdc",
+      "floorId": "rdc",
+      "name": "Salle d’eau"
+    },
+    {
+      "id": "office",
+      "floorId": "rdc",
+      "name": "Arrière-cuisine"
+    },
+    {
+      "id": "buanderie",
+      "floorId": "rdc",
+      "name": "Buanderie"
+    },
+    {
+      "id": "tour-etage",
+      "floorId": "etage",
+      "name": "Cabinet d’observation"
+    },
+    {
+      "id": "nursery",
+      "floorId": "etage",
+      "name": "Ancienne chambre jumelle"
+    },
+    {
+      "id": "piece-fermee",
+      "floorId": "etage",
+      "name": "Chambre fermée"
+    },
+    {
+      "id": "dressing",
+      "floorId": "etage",
+      "name": "Linge et dressing"
+    },
+    {
+      "id": "couloir-dangereux",
+      "floorId": "etage",
+      "name": "Couloir aux planchers"
+    },
+    {
+      "id": "palier",
+      "floorId": "etage",
+      "name": "Palier irrégulier"
+    },
+    {
+      "id": "escalier-etage",
+      "floorId": "etage",
+      "name": "Cage d’escalier"
+    },
+    {
+      "id": "chambre-stella",
+      "floorId": "etage",
+      "name": "Chambre de Stella"
+    },
+    {
+      "id": "chambre-antoine",
+      "floorId": "etage",
+      "name": "Chambre d’Antoine"
+    },
+    {
+      "id": "sdb",
+      "floorId": "etage",
+      "name": "Salle de bain"
+    },
+    {
+      "id": "chambre-myriam",
+      "floorId": "etage",
+      "name": "Chambre de Myriam"
+    },
+    {
+      "id": "petit-salon",
+      "floorId": "etage",
+      "name": "Petit salon"
+    },
+    {
+      "id": "piece-cartons",
+      "floorId": "etage",
+      "name": "Pièce des cartons"
+    },
+    {
+      "id": "cache-stella",
+      "floorId": "combles",
+      "name": "Cache de Stella"
+    },
+    {
+      "id": "poutres-dangereuses",
+      "floorId": "combles",
+      "name": "Travée des poutres"
+    },
+    {
+      "id": "grenier",
+      "floorId": "combles",
+      "name": "Grenier principal"
+    },
+    {
+      "id": "trappe-combles",
+      "floorId": "combles",
+      "name": "Trappe et jour"
+    },
+    {
+      "id": "archives",
+      "floorId": "combles",
+      "name": "Archives"
+    },
+    {
+      "id": "faitage-stella",
+      "floorId": "toit",
+      "name": "Faîtage — le perchoir"
+    },
+    {
+      "id": "lucarne",
+      "floorId": "toit",
+      "name": "Lucarne"
+    },
+    {
+      "id": "cheminees",
+      "floorId": "toit",
+      "name": "Souches de cheminée"
+    },
+    {
+      "id": "versant-mer",
+      "floorId": "toit",
+      "name": "Versant mer"
+    },
+    {
+      "id": "versant-est",
+      "floorId": "toit",
+      "name": "Versant montagnes"
+    }
+  ]
+}

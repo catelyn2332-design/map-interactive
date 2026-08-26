@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Atlas",
+      "hasCanvas": false,
+      "bodyTextLen": 307,
+      "bodyTextHash": "337ca3b635bd8f31240fdc78c5a83f4a7c7d62cebbb62229cdaffcf5ca64293e",
+      "bodyTextPrefix": "Atlas 1 Étage Clic droit sur un onglet, une pièce ou un élément ",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/atlas-dev.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Atlas",
+      "hasCanvas": false,
+      "bodyTextLen": 253,
+      "bodyTextHash": "a9041cf0707b5af54f2eb437f4223e0d5cfc42ec2629a5539d3a2ffcaa3339a4",
+      "bodyTextPrefix": "Atlas 1 Étage Appui long pour éditer un onglet, une pièce ou un ",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/atlas-dev-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/atlas-dev.json"
+}

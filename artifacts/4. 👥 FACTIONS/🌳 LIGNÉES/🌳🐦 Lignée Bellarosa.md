@@ -1,0 +1,5 @@
+La [[🌳🐦 Lignée Bellarosa]] est une famille monoparentale avec deux jumeaux coupée de la ville ayant un mode de vie, un style et une éducation qui tranche avec le commun des familles. Elle se situe dans la [[Maison des Bellarosa]], une grande et vieille bâtisse sur des collines avec les montagnes derrière elle à perte de vue.
+
+Cette famille, bien que brisée de l'intérieur qui vit l'absence de figure paternelle, a choisi d'opter pour une vie la plus autosuffisante possible avec leurs propres ressources pour survivre, tout en tenant coup face au chaos politique et existentiel du monde.
+C'est une famille qui a choisi, pour survivre, d'avoir une longueur d'avance sur autrui par leur indépendance et leur instruction.
+Le hic, c'est qu'il s'agit d'une famille avec une mère avec un passé sombre et deux enfants qui ignorent leurs origines ainsi que leurs réelles capacités de façon consciente.

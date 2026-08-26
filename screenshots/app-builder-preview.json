@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Atlas",
+      "hasCanvas": false,
+      "bodyTextLen": 402,
+      "bodyTextHash": "9bd82ff7e2b106c86d403ac31eb2efb66ec3bc2bc1d3885cae54bd3ca28d76bf",
+      "bodyTextPrefix": "Atlas Sauvegardes Propriétés 1 Étage Clic droit sur un onglet po",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Atlas",
+      "hasCanvas": false,
+      "bodyTextLen": 299,
+      "bodyTextHash": "1c7535679f96cde2e0650e302945f88d706c81185d885a23215b40481f780f5c",
+      "bodyTextPrefix": "Atlas 1 Étage Appui long sur un onglet pour l’éditer. Filtrer 10",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-preview.json"
+}

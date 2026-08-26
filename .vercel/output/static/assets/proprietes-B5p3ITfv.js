@@ -1,0 +1,1 @@
+import{r as e}from"./useRouter-Dp_HiUG-.js";import{wt as t}from"./index-DR_gqdNc.js";var n=e(),r=()=>(0,n.jsx)(t,{to:`/parametres/proprietes`});export{r as component};

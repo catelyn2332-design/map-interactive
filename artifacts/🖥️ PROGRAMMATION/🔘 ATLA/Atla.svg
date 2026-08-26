@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="860" viewBox="0 0 1280 860" role="img" aria-labelledby="title desc">
+  <title id="title">Atla — camembert des fiches du projet</title>
+  <desc id="desc">Répartition de 18 fiches : Personnages 7, Map 4, Timelines 4, Factions 1, Système du projet 2. Mesure du 21 août 2026.</desc>
+  <rect width="1280" height="860" fill="#0C0C0D"/>
+  <rect x="36" y="36" width="1208" height="788" rx="28" fill="#141416" stroke="#2A2A2E"/>
+  <text x="820" y="108" fill="#6E6C68" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" letter-spacing="3.2">INVENTAIRE DU PROJET</text>
+  <text x="820" y="168" fill="#ECEAE6" font-family="Georgia, 'Times New Roman', serif" font-size="56">Atla</text>
+  <text x="820" y="204" fill="#9C9A94" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">Mesure du 21 août 2026 · 18 fiches</text>
+  <path d="M 400.00 470.00 L 402.74 208.01 A 262 262 0 0 1 570.50 668.93 Z" fill="#C9B8A4"/>
+  <path d="M 400.00 470.00 L 566.30 672.46 A 262 262 0 0 1 233.70 672.46 Z" fill="#6E8B8A"/>
+  <path d="M 400.00 470.00 L 229.50 668.93 A 262 262 0 0 1 171.74 341.38 Z" fill="#7D8594"/>
+  <path d="M 400.00 470.00 L 174.49 336.63 A 262 262 0 0 1 229.50 271.07 Z" fill="#8C5E4F"/>
+  <path d="M 400.00 470.00 L 233.70 267.54 A 262 262 0 0 1 397.26 208.01 Z" fill="#A7A39A"/>
+  <circle cx="400" cy="470" r="90" fill="#0C0C0D"/>
+  <text x="400" y="466" text-anchor="middle" fill="#ECEAE6" font-family="Georgia, 'Times New Roman', serif" font-size="48">18</text>
+  <text x="400" y="496" text-anchor="middle" fill="#6E6C68" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" letter-spacing="3.2">FICHES</text>
+
+  <g transform="translate(820 268)">
+    <circle cx="10" cy="10" r="7" fill="#C9B8A4"/>
+    <text x="32" y="5" fill="#ECEAE6" font-family="Georgia, 'Times New Roman', serif" font-size="22">Personnages</text>
+    <text x="32" y="28" fill="#9C9A94" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">7 fiches  ·  38.9 %</text>
+  </g>
+
+  <g transform="translate(820 344)">
+    <circle cx="10" cy="10" r="7" fill="#6E8B8A"/>
+    <text x="32" y="5" fill="#ECEAE6" font-family="Georgia, 'Times New Roman', serif" font-size="22">Map</text>
+    <text x="32" y="28" fill="#9C9A94" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">4 fiches  ·  22.2 %</text>
+  </g>
+
+  <g transform="translate(820 420)">
+    <circle cx="10" cy="10" r="7" fill="#7D8594"/>
+    <text x="32" y="5" fill="#ECEAE6" font-family="Georgia, 'Times New Roman', serif" font-size="22">Timelines</text>
+    <text x="32" y="28" fill="#9C9A94" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">4 fiches  ·  22.2 %</text>
+  </g>
+
+  <g transform="translate(820 496)">
+    <circle cx="10" cy="10" r="7" fill="#8C5E4F"/>
+    <text x="32" y="5" fill="#ECEAE6" font-family="Georgia, 'Times New Roman', serif" font-size="22">Factions</text>
+    <text x="32" y="28" fill="#9C9A94" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">1 fiche  ·  5.6 %</text>
+  </g>
+
+  <g transform="translate(820 572)">
+    <circle cx="10" cy="10" r="7" fill="#A7A39A"/>
+    <text x="32" y="5" fill="#ECEAE6" font-family="Georgia, 'Times New Roman', serif" font-size="22">Système du projet</text>
+    <text x="32" y="28" fill="#9C9A94" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">2 fiches  ·  11.1 %</text>
+  </g>
+  <line x1="820" y1="656" x2="1190" y2="656" stroke="#2A2A2E"/>
+  <text x="820" y="688" fill="#6E6C68" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12">Personnages · Map · Timelines · Factions · Système</text>
+</svg>

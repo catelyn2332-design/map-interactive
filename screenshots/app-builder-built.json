@@ -1,0 +1,38 @@
+{
+  "url": "http://127.0.0.1:8081",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Atlas",
+      "hasCanvas": false,
+      "bodyTextLen": 319,
+      "bodyTextHash": "99fcacd30d82c85279f5c976e4edda6303aa68fc2de0cd6f6846dbc0b9f88bd6",
+      "bodyTextPrefix": "Atlas Sauvegardes 1 Étage Clic droit sur un onglet, une pièce ou",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Atlas",
+      "hasCanvas": false,
+      "bodyTextLen": 253,
+      "bodyTextHash": "a9041cf0707b5af54f2eb437f4223e0d5cfc42ec2629a5539d3a2ffcaa3339a4",
+      "bodyTextPrefix": "Atlas 1 Étage Appui long pour éditer un onglet, une pièce ou un ",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-built.json",
+  "divergesFromBaseline": false,
+  "baselineReasons": []
+}
