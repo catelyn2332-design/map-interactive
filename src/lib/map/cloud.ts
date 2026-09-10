@@ -6,10 +6,22 @@ function isRecord(raw: unknown): raw is Record<string, unknown> {
   return Boolean(raw) && typeof raw === "object" && !Array.isArray(raw);
 }
 
+async function ensureCloudTable() {
+  const sql = await getSql();
+  await sql`
+    create table if not exists atlas_cloud (
+      user_id text primary key,
+      payload text not null,
+      saved_at timestamptz not null default now()
+    )
+  `;
+  return sql;
+}
+
 /** Table exists + which backend is live. No row contents — safe unsigned. */
 export const cloudBackendReady = createServerFn({ method: "GET" }).handler(
   async () => {
-    const sql = await getSql();
+    const sql = await ensureCloudTable();
     const rows = await sql<{ name: string | null }>`
       select to_regclass('public.atlas_cloud')::text as name
     `;
@@ -23,7 +35,7 @@ export const cloudBackendReady = createServerFn({ method: "GET" }).handler(
 export const inspectOwnCloud = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
-    const sql = await getSql();
+    const sql = await ensureCloudTable();
     const rows = await sql<{ saved_at: string; bytes: number }>`
       select saved_at::text as saved_at, length(payload)::int as bytes
       from atlas_cloud
@@ -45,7 +57,7 @@ export const inspectOwnCloud = createServerFn({ method: "GET" })
 export const loadCloudPrefs = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
-    const sql = await getSql();
+    const sql = await ensureCloudTable();
     const rows = await sql<{ payload: string; saved_at: string }>`
       select payload, saved_at::text as saved_at
       from atlas_cloud
@@ -70,7 +82,7 @@ export const saveCloudPrefs = createServerFn({ method: "POST" })
     return { savedAt: data.savedAt, payloadJson: data.payloadJson };
   })
   .handler(async ({ context, data }) => {
-    const sql = await getSql();
+    const sql = await ensureCloudTable();
     const iso = new Date(data.savedAt).toISOString();
     await sql`
       insert into atlas_cloud (user_id, payload, saved_at)
@@ -85,7 +97,7 @@ export const saveCloudPrefs = createServerFn({ method: "POST" })
 export const clearCloudPrefs = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
-    const sql = await getSql();
+    const sql = await ensureCloudTable();
     await sql`delete from atlas_cloud where user_id = ${context.userId}`;
     return { ok: true as const };
   });

@@ -1,14 +1,6 @@
-import { Save } from "lucide-react";
-import { useRef } from "react";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import {
-  savePreferences,
-  useConfigDirty,
-  usePrefs,
-} from "@/lib/map/prefs";
+import { usePrefs } from "@/lib/map/prefs";
 import { formatSavedAt } from "@/lib/map/saves";
-import { pressProps } from "@/lib/press";
+import { OWNER } from "@/lib/progress/owner";
 import { cn } from "@/lib/utils";
 
 export function PrefsSaveBar({
@@ -18,38 +10,18 @@ export function PrefsSaveBar({
   sticky?: boolean;
   className?: string;
 }) {
-  const dirty = useConfigDirty();
   const saving = usePrefs((s) => s.saving);
   const lastSavedAt = usePrefs((s) => s.lastSavedAt);
   const loaded = usePrefs((s) => s.loaded);
   const cloud = usePrefs((s) => s.cloud);
-  const lock = useRef(false);
-
-  async function onSave() {
-    if (lock.current || saving || !dirty || !loaded) return;
-    lock.current = true;
-    try {
-      const ok = await savePreferences();
-      if (ok) toast.success("Préférences enregistrées");
-      else toast.error("Enregistrement impossible — réessayez");
-    } catch {
-      toast.error("Enregistrement impossible — réessayez");
-    } finally {
-      lock.current = false;
-    }
-  }
 
   const status = !loaded
-    ? "Chargement des préférences…"
-    : saving
-      ? "Enregistrement…"
-      : dirty
-        ? "Modifications non enregistrées"
-        : lastSavedAt
-          ? `Enregistré localement le ${formatSavedAt(lastSavedAt)}${
-              cloud === "synced" ? " · copie compte à jour" : ""
-            }`
-          : "Aucune modification";
+    ? "Chargement du bac à sable…"
+    : saving || cloud === "syncing"
+      ? "Enregistrement automatique…"
+      : lastSavedAt
+        ? `Mis à jour le ${formatSavedAt(lastSavedAt)} · ${OWNER.displayName}`
+        : "Enregistrement automatique à chaque modification";
 
   return (
     <div
@@ -61,26 +33,9 @@ export function PrefsSaveBar({
         className,
       )}
     >
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p
-          className={cn(
-            "text-xs",
-            dirty ? "text-foreground" : "text-muted-foreground",
-          )}
-          aria-live="polite"
-        >
-          {status}
-        </p>
-        <Button
-          type="button"
-          disabled={!dirty || saving || !loaded}
-          aria-busy={saving}
-          {...pressProps(() => void onSave())}
-        >
-          <Save className="size-4" />
-          Sauvegarder les préférences
-        </Button>
-      </div>
+      <p className="text-xs text-muted-foreground" aria-live="polite">
+        {status}
+      </p>
     </div>
   );
 }

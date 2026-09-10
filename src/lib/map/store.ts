@@ -12,51 +12,77 @@ import {
   useThemeStore,
 } from "../theme-store";
 import { resolveFloor } from "./edits";
+import { catalogWorld } from "./catalog";
+import { magnetPoly, translatePoly } from "./geometry";
+import {
+  liftGroundFixtures,
+  sanitizeTerrainMap,
+  stampStroke,
+  type TerrainMap,
+} from "./terrain";
 import {
   emptyRoom,
   factoryCharacters,
   factoryFloors,
   factoryFixtures,
   factoryRooms,
-  factoryWorld,
+  groupIdsOf,
+  applyRoomGroups,
   isFactoryWorld,
-  isLegacyFactoryWorld,
   linkFloors,
   roomById,
   roomsOnFloor,
   sanitizeCharacters,
   sanitizeFixtures,
   sanitizeFloors,
+  sanitizeGroups,
   sanitizeRooms,
+  sanitizeScenes,
   sanitizeTokenMap,
   scrubLegacyWorld,
 } from "./house";
 import { putCatalog } from "./idb";
 import {
   cloneSchema,
+  ensureGroupsProp,
+  GROUPS_PROP_ID,
+  DIMS_PROP_ID,
+  groupsFromOptions,
   isLegacyFactorySchema,
   readProp,
   sanitizeSchema,
   schemasEqual,
   scrubLegacySchema,
+  tokenActors,
   uid,
 } from "./props";
-import { hydrateUi, sanitizeChrome, sanitizeCopy, useUiStore } from "./ui";
+import { hydrateUi, sanitizeAssist, sanitizeChrome, sanitizeCopy, sanitizeVault, useUiStore } from "./ui";
+import { queueRoomNoteSync } from "./vault-files";
+import {
+  applyCoffreToLocal,
+  coffrePayload,
+  syncLocalToCoffre,
+} from "../progress/sync";
 import type {
   Character,
   DrawShape,
   FloorMeta,
+  GroundKind,
   MapFixture,
+  MapScene,
   MapTool,
   Point,
   PropDef,
+  PropPrimitive,
   PropValue,
   Room,
   RoomEdit,
+  RoomGroup,
   StairStyle,
   TokenPos,
   ZoneFill,
 } from "./types";
+import { GROUP_COLORS, clampGroundBrush, DEFAULT_GROUND_BRUSH } from "./types";
 
 const STORAGE_KEY = "atlas-bellarosa-v1";
 const SCHEMA_KEY = "atlas-bellarosa-schema";
@@ -69,34 +95,77 @@ function defaultTokens(characters: Character[] = []): Record<string, TokenPos> {
   return out;
 }
 
-let persistReady = import.meta.hot?.data.persistReady === true;
-let allowFactoryWrite = import.meta.hot?.data.allowFactoryWrite === true;
-let manualHydrateDone = import.meta.hot?.data.manualHydrateDone === true;
+let persistReady = false;
+let allowFactoryWrite = false;
+let manualHydrateDone = false;
 let persistWriteTimer: ReturnType<typeof setTimeout> | undefined;
 let persistWritePending: { name: string; value: string } | null = null;
-let worldWriteTimer: ReturnType<typeof setTimeout> | undefined;
-let worldWritePending: unknown = null;
 
-function rememberHot() {
-  if (!import.meta.hot) return;
-  import.meta.hot.data.persistReady = persistReady;
-  import.meta.hot.data.allowFactoryWrite = allowFactoryWrite;
-  import.meta.hot.data.manualHydrateDone = manualHydrateDone;
+const WRITE_WAIT_MS = 48;
+let schemaWriteTimer: ReturnType<typeof setTimeout> | undefined;
+let schemaWritePending: { schema: PropDef[]; force: boolean } | null = null;
+let worldWriteTimer: ReturnType<typeof setTimeout> | undefined;
+type WorldExtra = {
+  characters?: Character[];
+  tokens?: Record<string, TokenPos>;
+  groups?: RoomGroup[];
+  terrain?: TerrainMap;
+  scenes?: MapScene[];
+};
+
+let worldWritePending: {
+  floors: FloorMeta[];
+  rooms: Room[];
+  force: boolean;
+  fixtures?: MapFixture[];
+  extra?: WorldExtra;
+} | null = null;
+
+function asGroupIds(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((x): x is string => typeof x === "string" && Boolean(x.trim()));
+  if (typeof value === "string" && value.trim()) return [value.trim()];
+  return [];
+}
+
+function bindRoomFile(id: string, file: string) {
+  const s = useAtlas.getState();
+  const room = s.rooms.find((r) => r.id === id);
+  if (!room || room.file === file) return;
+  const rooms = s.rooms.map((r) => (r.id === id ? { ...r, file } : r));
+  persistWorld(s.floors, rooms, true);
+  useAtlas.setState({ rooms });
+}
+
+function syncRoomFile(room: Room) {
+  const vault = useUiStore.getState().vault;
+  if (!vault.workspace) return;
+  queueRoomNoteSync(room, vault.root, vault.syncNotes, vault.createOnRoom, bindRoomFile);
+}
+let persistPulse = 0;
+const persistListeners = new Set<(pulse: number, pending: boolean) => void>();
+
+function emitPersist(pending: boolean) {
+  persistPulse += 1;
+  const pulse = persistPulse;
+  for (const fn of persistListeners) fn(pulse, pending);
+}
+
+export function subscribePersistPulse(
+  fn: (pulse: number, pending: boolean) => void,
+) {
+  persistListeners.add(fn);
+  return () => {
+    persistListeners.delete(fn);
+  };
 }
 
 function writeJson(key: string, value: unknown) {
   try {
     const raw = JSON.stringify(value);
     localStorage.setItem(key, raw);
-    if (raw.length < 80_000) {
-      localStorage.setItem(`${key}-backup`, raw);
-    }
+    localStorage.setItem(`${key}-backup`, raw);
   } catch {
-    try {
-      localStorage.setItem(key, JSON.stringify(value));
-    } catch {
-      /* quota */
-    }
+    /* quota */
   }
 }
 
@@ -113,7 +182,7 @@ function readJson(key: string): unknown | null {
   return null;
 }
 
-export function persistSchema(schema: PropDef[], force = false) {
+function commitSchema(schema: PropDef[], force = false) {
   if (typeof window === "undefined") return;
   const next = sanitizeSchema(schema);
   if (!force && schemasEqual(next, cloneSchema())) {
@@ -124,15 +193,31 @@ export function persistSchema(schema: PropDef[], force = false) {
   putCatalog("schema", next);
 }
 
-export function persistWorld(
+export function persistSchema(schema: PropDef[], force = false) {
+  if (typeof window === "undefined") return;
+  schemaWritePending = { schema, force: force || Boolean(schemaWritePending?.force) };
+  emitPersist(true);
+  if (schemaWriteTimer) clearTimeout(schemaWriteTimer);
+  schemaWriteTimer = setTimeout(flushSchemaPersist, WRITE_WAIT_MS);
+}
+
+export function flushSchemaPersist() {
+  if (schemaWriteTimer) {
+    clearTimeout(schemaWriteTimer);
+    schemaWriteTimer = undefined;
+  }
+  const job = schemaWritePending;
+  schemaWritePending = null;
+  if (!job) return;
+  commitSchema(job.schema, job.force);
+}
+
+function commitWorld(
   floors: FloorMeta[],
   rooms: Room[],
   force = false,
   fixtures?: MapFixture[],
-  extra?: {
-    characters?: Character[];
-    tokens?: Record<string, TokenPos>;
-  },
+  extra?: WorldExtra,
 ) {
   if (typeof window === "undefined") return;
   const nextFloors = sanitizeFloors(floors);
@@ -166,31 +251,75 @@ export function persistWorld(
     )
       return;
   }
-  worldWritePending = {
+  const payload = {
     floors: nextFloors,
     rooms: nextRooms,
     fixtures: nextFixtures,
     characters: nextCharacters,
     tokens: nextTokens,
+    groups: extra?.groups ?? liveGroups(),
+    terrain: extra?.terrain ?? liveTerrain(),
+    scenes: extra?.scenes ?? liveScenes(),
   };
-  if (force) {
-    flushWorldWrite();
-    return;
-  }
-  if (worldWriteTimer) clearTimeout(worldWriteTimer);
-  worldWriteTimer = setTimeout(flushWorldWrite, 480);
+  writeJson(WORLD_KEY, payload);
+  putCatalog("world", payload);
 }
 
-export function flushWorldWrite() {
+export function persistWorld(
+  floors: FloorMeta[],
+  rooms: Room[],
+  force = false,
+  fixtures?: MapFixture[],
+  extra?: WorldExtra,
+) {
+  if (typeof window === "undefined") return;
+  worldWritePending = {
+    floors,
+    rooms,
+    force: force || Boolean(worldWritePending?.force),
+    fixtures,
+    extra,
+  };
+  emitPersist(true);
+  if (worldWriteTimer) clearTimeout(worldWriteTimer);
+  worldWriteTimer = setTimeout(flushWorldPersist, WRITE_WAIT_MS);
+}
+
+export function flushWorldPersist() {
   if (worldWriteTimer) {
     clearTimeout(worldWriteTimer);
     worldWriteTimer = undefined;
   }
-  if (!worldWritePending) return;
-  const payload = worldWritePending;
+  const job = worldWritePending;
   worldWritePending = null;
-  writeJson(WORLD_KEY, payload);
-  putCatalog("world", payload);
+  if (!job) {
+    emitPersist(false);
+    return;
+  }
+  commitWorld(job.floors, job.rooms, job.force, job.fixtures, job.extra);
+  emitPersist(false);
+  try {
+    const s = useAtlas.getState();
+    const ui = useUiStore.getState();
+    syncLocalToCoffre({
+      schema: s.schema,
+      floors: s.floors,
+      rooms: s.rooms,
+      fixtures: s.fixtures,
+      characters: s.characters,
+      tokens: s.tokens,
+      groups: s.groups,
+      scenes: s.scenes,
+      terrain: s.terrain,
+      appearance: useThemeStore.getState().theme,
+      copy: ui.copy,
+      chrome: ui.chrome,
+      assist: ui.assist,
+      vault: ui.vault,
+    });
+  } catch {
+    /* store pas encore prêt */
+  }
 }
 
 function liveFixtures(): MapFixture[] {
@@ -204,6 +333,30 @@ function liveFixtures(): MapFixture[] {
 function liveCharacters(): Character[] {
   try {
     return useAtlas.getState().characters ?? [];
+  } catch {
+    return [];
+  }
+}
+
+function liveGroups(): RoomGroup[] {
+  try {
+    return useAtlas.getState().groups ?? [];
+  } catch {
+    return [];
+  }
+}
+
+function liveTerrain(): TerrainMap {
+  try {
+    return useAtlas.getState().terrain ?? {};
+  } catch {
+    return {};
+  }
+}
+
+function liveScenes(): MapScene[] {
+  try {
+    return useAtlas.getState().scenes ?? [];
   } catch {
     return [];
   }
@@ -249,7 +402,6 @@ export function loadPersistedWorld(): {
 }
 
 function isFactorySnapshot(st: Record<string, unknown>): boolean {
-  if (!Array.isArray(st.floors) && !Array.isArray(st.rooms)) return false;
   const schema = st.schema;
   const factory = cloneSchema();
   const schemaMatch =
@@ -371,6 +523,9 @@ type PersistedSlice = {
   rooms: Room[];
   fixtures: MapFixture[];
   characters: Character[];
+  groups: RoomGroup[];
+  scenes: MapScene[];
+  terrain: TerrainMap;
 };
 
 export type LivePayload = PersistedSlice & { appearance?: unknown };
@@ -383,8 +538,13 @@ export type ConfigPayload = {
   appearance: unknown;
   copy?: unknown;
   chrome?: unknown;
+  assist?: unknown;
+  vault?: unknown;
   characters?: Character[];
   tokens?: Record<string, TokenPos>;
+  groups?: RoomGroup[];
+  scenes?: MapScene[];
+  terrain?: TerrainMap;
 };
 
 function pruneFilters(
@@ -428,6 +588,9 @@ function normalizeSlice(
   }
   if (s.schema !== undefined) out.schema = sanitizeSchema(s.schema);
   if (s.fixtures !== undefined) out.fixtures = sanitizeFixtures(s.fixtures, floors);
+  if (s.groups !== undefined) out.groups = sanitizeGroups(s.groups);
+  if (s.scenes !== undefined) out.scenes = sanitizeScenes(s.scenes);
+  if (s.terrain !== undefined) out.terrain = sanitizeTerrainMap(s.terrain);
   return out;
 }
 
@@ -444,7 +607,9 @@ function readPersistedRaw(): Record<string, unknown> | null {
 }
 
 function firstRoomOn(rooms: Room[], floorId: string) {
-  return roomsOnFloor(rooms, floorId)[0]?.id ?? null;
+  const here = roomsOnFloor(rooms, floorId);
+  const named = here.find((room) => !/^pi[eè]ce(?:\s+\d+)?$/i.test(room.name.trim()));
+  return named?.id ?? here[0]?.id ?? null;
 }
 
 type WorldSnap = {
@@ -454,6 +619,9 @@ type WorldSnap = {
   floorId: string;
   selectedId: string | null;
   selectedMarkId: string | null;
+  selectedGroupId: string | null;
+  groups: RoomGroup[];
+  terrain: TerrainMap;
 };
 
 function cloneSnap(s: WorldSnap): WorldSnap {
@@ -465,6 +633,9 @@ function cloneSnap(s: WorldSnap): WorldSnap {
       floorId: s.floorId,
       selectedId: s.selectedId,
       selectedMarkId: s.selectedMarkId,
+      selectedGroupId: s.selectedGroupId,
+      groups: s.groups,
+      terrain: s.terrain,
     }),
   ) as WorldSnap;
 }
@@ -508,7 +679,9 @@ function markPatchKind(patch: Partial<MapFixture>): string {
     patch.poly ||
     patch.kind ||
     patch.width !== undefined ||
-    patch.style
+    patch.style ||
+    patch.flip !== undefined ||
+    patch.hinge
   )
     return "world";
   return "mark-text";
@@ -529,6 +702,13 @@ export interface AtlasState {
   rooms: Room[];
   fixtures: MapFixture[];
   characters: Character[];
+  groups: RoomGroup[];
+  selectedGroupId: string | null;
+  scenes: MapScene[];
+  activeSceneId: string | null;
+  terrain: TerrainMap;
+  groundKind: GroundKind;
+  groundBrush: number;
   placingTokenId: string | null;
   tool: MapTool;
   drawShape: DrawShape;
@@ -537,7 +717,7 @@ export interface AtlasState {
   history: WorldSnap[];
   future: WorldSnap[];
   setFloor: (id: string) => void;
-  select: (id: string | null) => void;
+  select: (id: string | null, opts?: { isolate?: boolean }) => void;
   selectMark: (id: string | null) => void;
   setQuery: (q: string) => void;
   setFilter: (propId: string, value: string) => void;
@@ -547,6 +727,7 @@ export interface AtlasState {
   setScene: (roomId: string | null) => void;
   markExplored: (roomId: string) => void;
   patchRoom: (id: string, patch: RoomEdit) => void;
+  translateRooms: (ids: string[], dx: number, dy: number) => void;
   setRoomProp: (id: string, propId: string, value: PropValue) => void;
   resetRoom: (id: string) => void;
   addRoom: (poly: Point[]) => string | null;
@@ -555,6 +736,8 @@ export interface AtlasState {
   deleteFloor: (id: string) => void;
   patchFloor: (id: string, patch: Partial<FloorMeta>) => void;
   moveFloor: (id: string, dir: -1 | 1) => void;
+  reorderFloors: (id: string, beforeId: string) => void;
+  reorderFloorsAt: (id: string, index: number) => void;
   addFixture: (partial: Omit<MapFixture, "id"> & { id?: string }) => string;
   patchFixture: (id: string, patch: Partial<MapFixture>) => void;
   deleteFixture: (id: string) => void;
@@ -566,23 +749,76 @@ export interface AtlasState {
   setDrawShape: (shape: DrawShape) => void;
   setStairStyle: (style: StairStyle) => void;
   setZoneFill: (id: ZoneFill) => void;
+  addGroup: () => string;
+  patchGroup: (id: string, patch: Partial<RoomGroup>) => void;
+  deleteGroup: (id: string) => void;
+  selectGroup: (id: string | null) => void;
+  toggleRoomGroup: (roomId: string, groupId: string) => void;
+  paintGround: (stroke: Point[], mode?: "paint" | "erase") => void;
+  setGroundKind: (kind: GroundKind) => void;
+  setGroundBrush: (n: number) => void;
+  applyScene: (id: string | null) => void;
+  saveScene: () => string;
+  deleteScene: (id: string) => void;
   undo: () => void;
   redo: () => void;
   setSchema: (schema: PropDef[]) => void;
   resetSchema: () => void;
   resetWorld: () => void;
+  loadCatalogHouse: () => void;
   wander: () => string | null;
   resetSession: () => void;
+  setRoomExtra: (
+    roomId: string,
+    propId: string,
+    varId: string,
+    value: PropPrimitive,
+  ) => void;
 }
 
-const starterFloors = factoryFloors();
-const starterRooms = factoryRooms();
+const accountBoot = readBootWorld();
+const starterFloors = accountBoot.floors;
+const starterRooms = accountBoot.rooms;
+const starterFixtures = accountBoot.fixtures;
+const bootFloor =
+  starterFloors.find((f) => f.id === "etage-1") ?? starterFloors[0]!;
+
+function readBootWorld(): {
+  floors: FloorMeta[];
+  rooms: Room[];
+  fixtures: MapFixture[];
+  characters: Character[];
+  tokens: Record<string, TokenPos>;
+} {
+  const empty = {
+    floors: factoryFloors(),
+    rooms: factoryRooms(),
+    fixtures: factoryFixtures(),
+    characters: factoryCharacters(),
+    tokens: {} as Record<string, TokenPos>,
+  };
+  try {
+    const p = coffrePayload();
+    if (Array.isArray(p.floors) && p.floors.length) {
+      return {
+        floors: p.floors,
+        rooms: p.rooms ?? [],
+        fixtures: p.fixtures ?? [],
+        characters: p.characters ?? [],
+        tokens: p.tokens ?? {},
+      };
+    }
+  } catch {
+    /* snapshot absent */
+  }
+  return empty;
+}
 
 export const useAtlas = create<AtlasState>()(
   persist(
     (set, get) => ({
-      floorId: starterFloors[0]!.id,
-      selectedId: null,
+      floorId: bootFloor.id,
+      selectedId: firstRoomOn(starterRooms, bootFloor.id),
       query: "",
       filters: {},
       tokens: defaultTokens(),
@@ -592,8 +828,15 @@ export const useAtlas = create<AtlasState>()(
       schema: cloneSchema(),
       floors: starterFloors,
       rooms: starterRooms,
-      fixtures: factoryFixtures(),
+      fixtures: starterFixtures,
       characters: factoryCharacters(),
+      groups: [],
+      selectedGroupId: null,
+      scenes: [],
+      activeSceneId: null,
+      terrain: {},
+      groundKind: "meadow",
+      groundBrush: DEFAULT_GROUND_BRUSH,
       placingTokenId: null,
       tool: "select",
       drawShape: "rect",
@@ -609,12 +852,14 @@ export const useAtlas = create<AtlasState>()(
           return {
             floorId: id,
             selectedId: firstRoomOn(s.rooms, id),
+            selectedGroupId: null,
+            selectedMarkId: null,
             tool: "select",
           };
         }),
-      select: (id) => {
+      select: (id, _opts) => {
         if (!id) {
-          set({ selectedId: null, selectedMarkId: null });
+          set({ selectedId: null, selectedMarkId: null, selectedGroupId: null });
           return;
         }
         const room = roomById(get().rooms, id);
@@ -622,6 +867,7 @@ export const useAtlas = create<AtlasState>()(
         set((s) => ({
           selectedId: id,
           selectedMarkId: null,
+          selectedGroupId: null,
           floorId: room.floorId,
           explored: { ...s.explored, [id]: true },
         }));
@@ -633,14 +879,15 @@ export const useAtlas = create<AtlasState>()(
         }
         const mark = get().fixtures.find((f) => f.id === id);
         if (!mark) return;
-        set({ selectedMarkId: id, selectedId: null, floorId: mark.floorId });
+        set({ selectedMarkId: id, selectedId: null, selectedGroupId: null, floorId: mark.floorId });
       },
       setQuery: (query) => set({ query }),
       setFilter: (propId, value) =>
         set((s) => ({
           filters: { ...s.filters, [propId]: value },
+          activeSceneId: null,
         })),
-      clearFilters: () => set({ filters: {}, query: "" }),
+      clearFilters: () => set({ filters: {}, query: "", activeSceneId: null }),
       moveToken: (who, pos) =>
         set((s) => {
           const tokens = { ...s.tokens, [who]: pos };
@@ -661,22 +908,70 @@ export const useAtlas = create<AtlasState>()(
       patchRoom: (id, patch) =>
         set((s) => {
           if (!roomById(s.rooms, id)) return s;
-          const rooms = s.rooms.map((room) =>
-            room.id === id ? { ...room, ...patch } : room,
-          );
-          persistWorld(s.floors, rooms, roomPatchKind(patch) === "world");
-          return { ...takeHistory(s, roomPatchKind(patch)), rooms };
+          const nextPatch = { ...patch };
+          if (nextPatch.poly) {
+            const others = roomsOnFloor(s.rooms, s.floorId)
+              .filter((r) => r.id !== id)
+              .map((r) => r.poly);
+            nextPatch.poly = magnetPoly(nextPatch.poly, others);
+          }
+          const rooms = s.rooms.map((room) => {
+            if (room.id !== id) return room;
+            const merged: Room = { ...room, ...nextPatch };
+            if (nextPatch.file === "") delete merged.file;
+            if (nextPatch.groupIds) return applyRoomGroups(merged, nextPatch.groupIds);
+            if (nextPatch.props && GROUPS_PROP_ID in nextPatch.props) {
+              return applyRoomGroups(merged, asGroupIds(nextPatch.props[GROUPS_PROP_ID]));
+            }
+            if (nextPatch.props) return applyRoomGroups(merged, groupIdsOf(room));
+            return merged;
+          });
+          persistWorld(s.floors, rooms, true);
+          if (nextPatch.name !== undefined || nextPatch.description !== undefined) {
+            const merged = rooms.find((r) => r.id === id);
+            if (merged) syncRoomFile(merged);
+          }
+          return { ...takeHistory(s, roomPatchKind(nextPatch)), rooms };
+        }),
+      translateRooms: (ids, dx, dy) =>
+        set((s) => {
+          if (!dx && !dy) return s;
+          const moving = new Set(ids.filter((id) => roomById(s.rooms, id)));
+          if (!moving.size) return s;
+          const others = roomsOnFloor(s.rooms, s.floorId)
+            .filter((r) => !moving.has(r.id))
+            .map((r) => r.poly);
+          const rooms = s.rooms.map((room) => {
+            if (!moving.has(room.id)) return room;
+            return { ...room, poly: magnetPoly(translatePoly(room.poly, dx, dy), others, 32) };
+          });
+          persistWorld(s.floors, rooms, true);
+          return { ...takeHistory(s, "world"), rooms };
         }),
       setRoomProp: (id, propId, value) =>
         set((s) => {
+          if (propId === DIMS_PROP_ID) return s;
           const room = roomById(s.rooms, id);
           if (!room) return s;
-          const rooms = s.rooms.map((r) =>
-            r.id === id
-              ? { ...r, props: { ...(r.props ?? {}), [propId]: value } }
-              : r,
-          );
-          persistWorld(s.floors, rooms, false);
+          const rooms = s.rooms.map((r) => {
+            if (r.id !== id) return r;
+            if (propId === GROUPS_PROP_ID) return applyRoomGroups(r, asGroupIds(value));
+            return { ...r, props: { ...(r.props ?? {}), [propId]: value } };
+          });
+          persistWorld(s.floors, rooms, true);
+          return { ...takeHistory(s, "room-text"), rooms };
+        }),
+      setRoomExtra: (roomId, propId, varId, value) =>
+        set((s) => {
+          const room = roomById(s.rooms, roomId);
+          if (!room) return s;
+          const rooms = s.rooms.map((r) => {
+            if (r.id !== roomId) return r;
+            const bag = { ...(r.propExtras ?? {}) };
+            bag[propId] = { ...(bag[propId] ?? {}), [varId]: value };
+            return { ...r, propExtras: bag };
+          });
+          persistWorld(s.floors, rooms, true);
           return { ...takeHistory(s, "room-text"), rooms };
         }),
       resetRoom: (id) =>
@@ -701,16 +996,17 @@ export const useAtlas = create<AtlasState>()(
         }),
       addRoom: (poly) => {
         const s = get();
-        const count = roomsOnFloor(s.rooms, s.floorId).length + 1;
+        const others = roomsOnFloor(s.rooms, s.floorId).map((r) => r.poly);
+        const snapped = magnetPoly(poly, others);
+        const count = others.length + 1;
         const word = useUiStore.getState().copy.roomWord;
         const room = emptyRoom({
           floorId: s.floorId,
           name: `${word} ${count}`,
           label: String(count),
-          poly,
+          poly: snapped,
         });
         const rooms = [...s.rooms, room];
-        persistWorld(s.floors, rooms, true);
         set({
           ...takeHistory(s, "world"),
           rooms,
@@ -718,6 +1014,7 @@ export const useAtlas = create<AtlasState>()(
           tool: "select",
           explored: { ...s.explored, [room.id]: true },
         });
+        persistWorld(s.floors, rooms, true);
         return room.id;
       },
       deleteRoom: (id) =>
@@ -802,7 +1099,7 @@ export const useAtlas = create<AtlasState>()(
           const floors = linkFloors(
             s.floors.map((f) => (f.id === id ? { ...f, ...patch, id: f.id } : f)),
           );
-          persistWorld(floors, s.rooms, floorPatchKind(patch) === "world", s.fixtures);
+          persistWorld(floors, s.rooms, true, s.fixtures);
           return { ...takeHistory(s, floorPatchKind(patch)), floors };
         }),
       moveFloor: (id, dir) =>
@@ -814,6 +1111,35 @@ export const useAtlas = create<AtlasState>()(
           const a = next[i]!;
           next[i] = next[j]!;
           next[j] = a;
+          const floors = linkFloors(next);
+          persistWorld(floors, s.rooms, true, s.fixtures);
+          return { ...takeHistory(s, "world"), floors };
+        }),
+      reorderFloors: (id, beforeId) =>
+        set((s) => {
+          if (id === beforeId) return s;
+          const from = s.floors.findIndex((f) => f.id === id);
+          const to = s.floors.findIndex((f) => f.id === beforeId);
+          if (from < 0 || to < 0) return s;
+          const next = [...s.floors];
+          const [item] = next.splice(from, 1);
+          if (!item) return s;
+          const insert = next.findIndex((f) => f.id === beforeId);
+          next.splice(insert < 0 ? next.length : insert, 0, item);
+          const floors = linkFloors(next);
+          persistWorld(floors, s.rooms, true, s.fixtures);
+          return { ...takeHistory(s, "world"), floors };
+        }),
+      reorderFloorsAt: (id, index) =>
+        set((s) => {
+          const from = s.floors.findIndex((f) => f.id === id);
+          if (from < 0) return s;
+          const to = Math.max(0, Math.min(index, s.floors.length - 1));
+          if (from === to) return s;
+          const next = [...s.floors];
+          const [item] = next.splice(from, 1);
+          if (!item) return s;
+          next.splice(to, 0, item);
           const floors = linkFloors(next);
           persistWorld(floors, s.rooms, true, s.fixtures);
           return { ...takeHistory(s, "world"), floors };
@@ -859,7 +1185,7 @@ export const useAtlas = create<AtlasState>()(
           const fixtures = s.fixtures.map((f) =>
             f.id === id ? { ...f, ...patch, id: f.id } : f,
           );
-          persistWorld(s.floors, s.rooms, markPatchKind(patch) === "world", fixtures);
+          persistWorld(s.floors, s.rooms, true, fixtures);
           return { ...takeHistory(s, markPatchKind(patch)), fixtures };
         }),
       deleteFixture: (id) =>
@@ -878,16 +1204,24 @@ export const useAtlas = create<AtlasState>()(
         const s = get();
         const n = s.characters.length + 1;
         const full = (name ?? "").trim() || `Pion ${n}`;
+        const palette = ["#c45c4a", "#3f5344", "#4a6fa5", "#b5812f", "#6b4c7a", "#2f6f6a"];
         const character: Character = {
           id: uid("pion"),
           name: full.slice(0, 80),
           short: full.slice(0, 1).toUpperCase(),
           role: "",
+          color: palette[(n - 1) % palette.length],
         };
         const characters = [...s.characters, character];
+        const vb = s.floors.find((f) => f.id === s.floorId)?.viewBox ?? [0, 0, 1600, 1000];
         const tokens = {
           ...s.tokens,
-          [character.id]: { floorId: s.floorId, roomId: "" as const },
+          [character.id]: {
+            floorId: s.floorId,
+            roomId: "" as const,
+            x: vb[0] + vb[2] / 2,
+            y: vb[1] + vb[3] / 2,
+          },
         };
         persistWorld(s.floors, s.rooms, true, s.fixtures, { characters, tokens });
         set({
@@ -997,7 +1331,18 @@ export const useAtlas = create<AtlasState>()(
           const next = sanitizeSchema(schema);
           allowFactoryWrite = true;
           persistSchema(next, true);
-          return { schema: next, filters: pruneFilters(s.filters, next) };
+          const actors = tokenActors(next, s.characters);
+          const tokens = { ...s.tokens };
+          for (const a of actors) {
+            if (!tokens[a.id]) {
+              tokens[a.id] = { floorId: s.floorId, roomId: "" };
+            }
+          }
+          persistWorld(s.floors, s.rooms, true, s.fixtures, {
+            characters: s.characters,
+            tokens,
+          });
+          return { schema: next, filters: pruneFilters(s.filters, next), tokens };
         }),
       resetSchema: () => {
         allowFactoryWrite = true;
@@ -1036,16 +1381,149 @@ export const useAtlas = create<AtlasState>()(
           future: [],
         });
       },
+      loadCatalogHouse: () => {
+        const s = get();
+        const world = catalogWorld();
+        allowFactoryWrite = true;
+        persistWorld(world.floors, world.rooms, true, world.fixtures, {
+          characters: world.characters,
+          tokens: world.tokens,
+        });
+        set({
+          ...takeHistory(s, "world"),
+          floors: world.floors,
+          rooms: world.rooms,
+          fixtures: world.fixtures,
+          characters: world.characters,
+          tokens: world.tokens,
+          floorId: "rdc",
+          selectedId: "salon",
+          placingTokenId: null,
+          selectedMarkId: null,
+          filters: {},
+          notes: {},
+          sceneRoomId: null,
+          explored: {},
+          tool: "select",
+        });
+      },
       wander: () => {
-        const { floorId, query, filters, rooms, schema } = get();
+        const { floorId, query, filters, rooms, schema, tokens } = get();
         const pool = resolveFloor(floorId, rooms, schema).filter((r) =>
-          roomMatches(r, schema, filters, query),
+          roomMatches(r, schema, filters, query, tokens),
         );
         if (pool.length === 0) return null;
         const pick = pool[Math.floor(Math.random() * pool.length)]!;
         get().select(pick.id);
         return pick.id;
       },
+
+      addGroup: () => {
+        const s = get();
+        const id = uid("grp");
+        const color = GROUP_COLORS[s.groups.length % GROUP_COLORS.length]!;
+        const group: RoomGroup = { id, name: `Groupe ${s.groups.length + 1}`, color };
+        const groups = [...s.groups, group];
+        persistWorld(s.floors, s.rooms, true, s.fixtures, { groups });
+        set({
+          ...takeHistory(s, "world"),
+          groups,
+          selectedGroupId: id,
+          selectedId: null,
+          selectedMarkId: null,
+          schema: ensureGroupsProp(s.schema, groups),
+        });
+        return id;
+      },
+      patchGroup: (id, patch) =>
+        set((s) => {
+          if (!s.groups.some((g) => g.id === id)) return s;
+          const groups = s.groups.map((g) => (g.id === id ? { ...g, ...patch, id: g.id } : g));
+          persistWorld(s.floors, s.rooms, true, s.fixtures, { groups });
+          return { ...takeHistory(s, "world"), groups, schema: ensureGroupsProp(s.schema, groups) };
+        }),
+      deleteGroup: (id) =>
+        set((s) => {
+          if (!s.groups.some((g) => g.id === id)) return s;
+          const groups = s.groups.filter((g) => g.id !== id);
+          const rooms = s.rooms.map((r) =>
+            groupIdsOf(r).includes(id)
+              ? applyRoomGroups(r, groupIdsOf(r).filter((g) => g !== id))
+              : r,
+          );
+          persistWorld(s.floors, rooms, true, s.fixtures, { groups });
+          return {
+            ...takeHistory(s, "world"),
+            groups,
+            rooms,
+            selectedGroupId: s.selectedGroupId === id ? null : s.selectedGroupId,
+            schema: ensureGroupsProp(s.schema, groups),
+          };
+        }),
+      selectGroup: (id) =>
+        set({
+          selectedGroupId: id,
+          selectedId: id ? null : get().selectedId,
+          selectedMarkId: id ? null : get().selectedMarkId,
+        }),
+      toggleRoomGroup: (roomId, groupId) =>
+        set((s) => {
+          const room = roomById(s.rooms, roomId);
+          if (!room || !s.groups.some((g) => g.id === groupId)) return s;
+          const ids = groupIdsOf(room);
+          const next = ids.includes(groupId) ? ids.filter((g) => g !== groupId) : [...ids, groupId];
+          const rooms = s.rooms.map((r) => (r.id === roomId ? applyRoomGroups(r, next) : r));
+          persistWorld(s.floors, rooms, true);
+          return { ...takeHistory(s, "world"), rooms };
+        }),
+      paintGround: (stroke, mode = "paint") =>
+        set((s) => {
+          if (!stroke.length) return s;
+          const packed = stampStroke(
+            s.terrain[s.floorId],
+            stroke,
+            s.groundBrush,
+            s.groundKind,
+            mode,
+          );
+          const terrain = { ...s.terrain };
+          if (packed.cols === 0) delete terrain[s.floorId];
+          else terrain[s.floorId] = packed;
+          persistWorld(s.floors, s.rooms, true, s.fixtures, { terrain });
+          return { ...takeHistory(s, "world"), terrain };
+        }),
+      setGroundKind: (groundKind) => set({ groundKind }),
+      setGroundBrush: (n) => set({ groundBrush: clampGroundBrush(n) }),
+      applyScene: (id) =>
+        set((s) => {
+          if (!id) return { activeSceneId: null };
+          const scene = s.scenes.find((sc) => sc.id === id);
+          if (!scene) return s;
+          return { activeSceneId: id, query: scene.query, filters: { ...scene.filters } };
+        }),
+      saveScene: () => {
+        const s = get();
+        const id = uid("scene");
+        const scene: MapScene = {
+          id,
+          name: `Vue ${s.scenes.length + 1}`,
+          filters: { ...s.filters },
+          query: s.query,
+        };
+        const scenes = [...s.scenes, scene].slice(-16);
+        persistWorld(s.floors, s.rooms, true, s.fixtures, { scenes });
+        set({ scenes, activeSceneId: id });
+        return id;
+      },
+      deleteScene: (id) =>
+        set((s) => {
+          const scenes = s.scenes.filter((sc) => sc.id !== id);
+          persistWorld(s.floors, s.rooms, true, s.fixtures, { scenes });
+          return {
+            scenes,
+            activeSceneId: s.activeSceneId === id ? null : s.activeSceneId,
+          };
+        }),
       resetSession: () =>
         set((s) => ({
           tokens: defaultTokens(s.characters),
@@ -1053,6 +1531,7 @@ export const useAtlas = create<AtlasState>()(
           sceneRoomId: null,
           explored: {},
           selectedId: firstRoomOn(s.rooms, s.floorId),
+          selectedGroupId: null,
           placingTokenId: null,
         })),
     }),
@@ -1068,6 +1547,15 @@ export const useAtlas = create<AtlasState>()(
         explored: s.explored,
         floorId: s.floorId,
         selectedId: s.selectedId,
+        schema: s.schema,
+        floors: s.floors,
+        rooms: s.rooms,
+        fixtures: s.fixtures,
+        characters: s.characters,
+        groups: s.groups,
+        scenes: s.scenes,
+        terrain: s.terrain,
+        appearance: useThemeStore.getState().theme,
       }),
       merge: (persisted, current) => {
         if (manualHydrateDone) return current;
@@ -1080,6 +1568,9 @@ export const useAtlas = create<AtlasState>()(
           rooms: p.rooms ?? current.rooms,
           fixtures: p.fixtures ?? current.fixtures,
           characters: p.characters ?? current.characters,
+          groups: p.groups ?? current.groups,
+          scenes: p.scenes ?? current.scenes,
+          terrain: p.terrain ?? current.terrain,
           filters: {},
           tool: "select" as MapTool,
           drawShape: "rect" as DrawShape,
@@ -1113,32 +1604,6 @@ export const useAtlas = create<AtlasState>()(
   ),
 );
 
-if (import.meta.hot) {
-  const prev = import.meta.hot.data.atlasBag as Partial<AtlasState> | undefined;
-  if (prev?.floors && prev?.rooms) {
-    useAtlas.setState({
-      floors: prev.floors,
-      rooms: prev.rooms,
-      fixtures: prev.fixtures,
-      characters: prev.characters,
-      tokens: prev.tokens,
-      schema: prev.schema,
-      floorId: prev.floorId,
-      selectedId: prev.selectedId,
-      selectedMarkId: prev.selectedMarkId,
-    });
-    persistReady = true;
-    manualHydrateDone = true;
-  }
-  rememberHot();
-  import.meta.hot.dispose(() => {
-    flushWorldWrite();
-    flushPersistWrite();
-    import.meta.hot!.data.atlasBag = useAtlas.getState();
-    rememberHot();
-  });
-}
-
 function restoreAppearance(raw: unknown) {
   if (loadPersisted()) return;
   const theme = sanitizeTheme(raw);
@@ -1147,45 +1612,59 @@ function restoreAppearance(raw: unknown) {
   persistTheme(theme);
 }
 
-export function hydrateAtlas() {
-  if (typeof window === "undefined") return;
-  if (manualHydrateDone) {
-    persistReady = true;
-    rememberHot();
+function pinCoffreAsLocal() {
+  const live = useAtlas.getState();
+  if (live.rooms.length > 0 || live.fixtures.length > 0) {
     return;
   }
+  applyCoffreToLocal((patch) => {
+    useAtlas.setState({
+      ...patch,
+      filters: {},
+      tool: "select",
+    });
+  });
+}
+
+export function ensureRoomSelected() {
+  const s = useAtlas.getState();
+  if (s.selectedMarkId || s.selectedGroupId) return;
+  if (s.selectedId && roomById(s.rooms, s.selectedId)) return;
+  const id = firstRoomOn(s.rooms, s.floorId) ?? s.rooms[0]?.id ?? null;
+  if (!id) return;
+  const room = roomById(s.rooms, id);
+  useAtlas.setState({
+    selectedId: id,
+    floorId: room?.floorId ?? s.floorId,
+  });
+}
+
+export function hydrateAtlas() {
+  if (typeof window === "undefined") return;
+  if (manualHydrateDone && document.documentElement.dataset.atlasHydrated === "1") {
+    persistReady = true;
+    return;
+  }
+  pinCoffreAsLocal();
   const raw = readPersistedRaw();
-  const dedicatedWorld = loadPersistedWorld();
   if (raw) {
     const slice = normalizeSlice(raw);
-    if (dedicatedWorld) {
-      delete slice.floors;
-      delete slice.rooms;
-      delete slice.fixtures;
-      delete slice.characters;
-      delete slice.schema;
-    }
     let scrubbed = false;
     if (slice.schema && isLegacyFactorySchema(slice.schema)) {
       slice.schema = [];
       scrubbed = true;
     }
-    if (
-      slice.floors &&
-      slice.rooms &&
-      isLegacyFactoryWorld(slice.floors, slice.rooms)
-    ) {
-      const world = factoryWorld();
-      slice.floors = world.floors;
-      slice.rooms = world.rooms;
-      slice.fixtures = world.fixtures;
-      slice.floorId = world.floors[0]!.id;
-      slice.selectedId = null;
-      slice.characters = world.characters;
-      slice.tokens = world.tokens;
-      scrubbed = true;
-    }
-    if (Object.keys(slice).length) {
+    const incomingEmpty =
+      !(slice.rooms && slice.rooms.length) &&
+      !(slice.fixtures && slice.fixtures.length);
+    const live = useAtlas.getState();
+    const incomingW =
+      (slice.rooms?.length ?? 0) * 100 +
+      (slice.floors?.length ?? 0) * 10 +
+      (slice.fixtures?.length ?? 0);
+    const liveW = live.rooms.length * 100 + live.floors.length * 10 + live.fixtures.length;
+    // Une copie locale vide / plus légère (session sans compte) ne remplace pas le coffre.
+    if (!incomingEmpty && incomingW >= liveW) {
       useAtlas.setState({
         ...slice,
         filters: {},
@@ -1203,11 +1682,12 @@ export function hydrateAtlas() {
     restoreAppearance(raw.appearance);
   }
   applyDedicatedConfig();
+  pinCoffreAsLocal();
   manualHydrateDone = true;
   persistReady = true;
-  rememberHot();
-  void useAtlas.persist.rehydrate();
+  if (!raw) void useAtlas.persist.rehydrate();
   document.documentElement.dataset.atlasHydrated = "1";
+  ensureRoomSelected();
 }
 
 export function applyDedicatedConfig() {
@@ -1215,8 +1695,7 @@ export function applyDedicatedConfig() {
   const worldRaw = loadPersistedWorld();
   const live = useAtlas.getState();
   const patch: Partial<AtlasState> = { filters: {} };
-  const liveSchemaFactory = schemasEqual(live.schema, cloneSchema());
-  if (schemaRaw && liveSchemaFactory) {
+  if (schemaRaw) {
     const schema = scrubLegacySchema(schemaRaw);
     patch.schema = schema;
     if (isLegacyFactorySchema(schemaRaw)) {
@@ -1225,6 +1704,12 @@ export function applyDedicatedConfig() {
     }
   }
   if (worldRaw) {
+    const incomingEmpty =
+      worldRaw.rooms.length === 0 && worldRaw.fixtures.length === 0;
+    const liveHas = live.rooms.length > 0 || live.fixtures.length > 0;
+    if (incomingEmpty && liveHas) {
+      /* le coffre / la session live gagnent sur un local vide */
+    } else {
     const world = scrubLegacyWorld(
       worldRaw.floors,
       worldRaw.rooms,
@@ -1244,14 +1729,7 @@ export function applyDedicatedConfig() {
       world.fixtures,
       world.characters,
     );
-    if (isLegacyFactoryWorld(worldRaw.floors, worldRaw.rooms) && !liveRich) {
-      allowFactoryWrite = true;
-      persistWorld(world.floors, world.rooms, true, world.fixtures, {
-        characters: world.characters,
-        tokens: world.tokens,
-      });
-    }
-    if (!liveRich && !incomingFactory) {
+    if (!(liveRich && incomingFactory)) {
       patch.floors = world.floors;
       patch.rooms = world.rooms;
       patch.fixtures = world.fixtures;
@@ -1264,8 +1742,7 @@ export function applyDedicatedConfig() {
           patch.floorId ?? world.floors[0]?.id ?? "",
         );
       }
-    } else if (!liveRich && incomingFactory && worldRaw.hasTokens) {
-      patch.tokens = world.tokens;
+    }
     }
   }
   if (
@@ -1286,20 +1763,11 @@ export function applyDedicatedConfig() {
 }
 
 if (typeof window !== "undefined") {
-  if (document.documentElement.dataset.atlasHydrated === "1") {
-    hydrateAtlas();
-  }
   if (!document.documentElement.dataset.atlasPersistFlush) {
     document.documentElement.dataset.atlasPersistFlush = "1";
-    window.addEventListener("pagehide", () => {
-      flushPersistWrite();
-      flushWorldWrite();
-    });
+    window.addEventListener("pagehide", flushLivePersist);
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "hidden") {
-        flushPersistWrite();
-        flushWorldWrite();
-      }
+      if (document.visibilityState === "hidden") flushLivePersist();
     });
   }
 }
@@ -1311,16 +1779,40 @@ export function isPersistReady() {
 export function flushLivePersist() {
   if (typeof window === "undefined") return;
   persistReady = true;
-  rememberHot();
   flushPersistWrite();
-  flushWorldWrite();
   try {
     const s = useAtlas.getState();
-    persistSchema(s.schema);
-    persistWorld(s.floors, s.rooms, true, s.fixtures, {
-      characters: s.characters,
-      tokens: s.tokens,
-    });
+    const snapshot = {
+      state: {
+        tokens: s.tokens,
+        notes: s.notes,
+        sceneRoomId: s.sceneRoomId,
+        explored: s.explored,
+        floorId: s.floorId,
+        selectedId: s.selectedId,
+        schema: s.schema,
+        floors: s.floors,
+        rooms: s.rooms,
+        fixtures: s.fixtures,
+        characters: s.characters,
+        appearance: useThemeStore.getState().theme,
+      },
+      version: 6,
+    };
+    writePersistNow(STORAGE_KEY, JSON.stringify(snapshot));
+    if (schemaWritePending) flushSchemaPersist();
+    else commitSchema(s.schema);
+    if (worldWritePending) flushWorldPersist();
+    else {
+      commitWorld(s.floors, s.rooms, false, s.fixtures, {
+        characters: s.characters,
+        tokens: s.tokens,
+        groups: s.groups,
+        terrain: s.terrain,
+        scenes: s.scenes,
+      });
+      emitPersist(false);
+    }
   } catch {
     /* quota */
   }
@@ -1329,17 +1821,24 @@ export function flushLivePersist() {
 export function captureConfigPayload(): ConfigPayload {
   const s = useAtlas.getState();
   const ui = useUiStore.getState();
-  return {
-    schema: s.schema,
-    floors: s.floors,
-    rooms: s.rooms,
-    fixtures: s.fixtures,
-    characters: s.characters,
-    tokens: s.tokens,
-    appearance: useThemeStore.getState().theme,
-    copy: ui.copy,
-    chrome: ui.chrome,
-  };
+  return JSON.parse(
+    JSON.stringify({
+      schema: s.schema,
+      floors: s.floors,
+      rooms: s.rooms,
+      fixtures: s.fixtures,
+      characters: s.characters,
+      tokens: s.tokens,
+      groups: s.groups,
+      scenes: s.scenes,
+      terrain: s.terrain,
+      appearance: useThemeStore.getState().theme,
+      copy: ui.copy,
+      chrome: ui.chrome,
+      assist: ui.assist,
+      vault: ui.vault,
+    }),
+  ) as ConfigPayload;
 }
 
 export function applyConfigPayload(
@@ -1360,7 +1859,9 @@ export function applyConfigPayload(
     slice.characters === undefined &&
     !theme &&
     rec.copy === undefined &&
-    rec.chrome === undefined
+    rec.chrome === undefined &&
+    rec.assist === undefined &&
+    rec.vault === undefined
   ) {
     return false;
   }
@@ -1373,6 +1874,9 @@ export function applyConfigPayload(
   if (slice.fixtures !== undefined) patch.fixtures = slice.fixtures;
   if (slice.characters !== undefined) patch.characters = slice.characters;
   if (slice.tokens !== undefined) patch.tokens = slice.tokens;
+  if (slice.groups !== undefined) patch.groups = slice.groups;
+  if (slice.scenes !== undefined) patch.scenes = slice.scenes;
+  if (slice.terrain !== undefined) patch.terrain = slice.terrain;
   if (slice.floorId) patch.floorId = slice.floorId;
   if (slice.selectedId !== undefined) patch.selectedId = slice.selectedId;
   useAtlas.setState(patch);
@@ -1380,10 +1884,12 @@ export function applyConfigPayload(
     applyPersistedTheme(theme);
     persistTheme(theme);
   }
-  if (applyUi && (rec.copy !== undefined || rec.chrome !== undefined)) {
+  if (applyUi && (rec.copy !== undefined || rec.chrome !== undefined || rec.assist !== undefined || rec.vault !== undefined)) {
     hydrateUi({
       copy: rec.copy !== undefined ? sanitizeCopy(rec.copy) : undefined,
       chrome: rec.chrome !== undefined ? sanitizeChrome(rec.chrome) : undefined,
+      assist: rec.assist !== undefined ? sanitizeAssist(rec.assist) : undefined,
+      vault: rec.vault !== undefined ? sanitizeVault(rec.vault) : undefined,
     });
   }
   const s = useAtlas.getState();
@@ -1392,6 +1898,7 @@ export function applyConfigPayload(
     characters: s.characters,
     tokens: s.tokens,
   });
+  ensureRoomSelected();
   return true;
 }
 
@@ -1400,6 +1907,7 @@ export function roomMatches(
   schema: PropDef[],
   filters: Record<string, string>,
   query: string,
+  tokens?: Record<string, TokenPos>,
 ): boolean {
   const props = room.props ?? {};
   for (const def of schema) {
@@ -1410,8 +1918,14 @@ export function roomMatches(
     if (def.type === "tags") {
       const ids = Array.isArray(value) ? value : [];
       if (!ids.includes(filter)) return false;
-    } else if (def.type === "choice") {
+    } else if (def.type === "choice" || def.type === "preset") {
       if (value !== filter) return false;
+    } else if (def.type === "toggle") {
+      const on = value === true;
+      if (filter === "oui" && !on) return false;
+      if (filter === "non" && on) return false;
+    } else if (def.type === "token") {
+      if (!tokens || tokens[filter]?.roomId !== room.id) return false;
     } else if (
       !String(value ?? "")
         .toLowerCase()

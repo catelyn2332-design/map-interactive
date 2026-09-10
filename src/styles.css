@@ -11,12 +11,19 @@
   --color-muted-foreground: #6b6458;
   --color-primary: #3f5344;
   --color-primary-foreground: #f3eee4;
+  --color-primary-hover: #36473b;
   --color-secondary: #e4dccb;
   --color-secondary-foreground: #1f1c17;
   --color-accent: #e7dfcf;
   --color-accent-foreground: #1f1c17;
   --color-border: #d5ccbb;
   --color-input: #d5ccbb;
+  --color-field: #fbf7ee;
+  --color-field-foreground: #1f1c17;
+  --color-icon: #ebe3d4;
+  --color-icon-foreground: #1f1c17;
+  --color-icon-hover: #dcd3c3;
+  --color-icon-stroke: #5a7384;
   --color-ring: #3f5344;
   --color-destructive: #8f3d32;
   --color-destructive-foreground: #f3eee4;
@@ -71,6 +78,27 @@
     text-decoration: none;
   }
 
+  a:focus,
+  button:focus,
+  summary:focus {
+    outline: none;
+  }
+
+  a,
+  button,
+  summary {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  summary {
+    list-style: none;
+    cursor: pointer;
+  }
+
+  summary::-webkit-details-marker {
+    display: none;
+  }
+
   button,
   [type="button"],
   [type="submit"],
@@ -83,6 +111,29 @@
   [role="button"]:not(:disabled) {
     cursor: pointer;
     touch-action: manipulation;
+  }
+
+  button:not(:disabled):hover,
+  [role="button"]:not(:disabled):hover,
+  summary:hover {
+    filter: brightness(0.93);
+  }
+
+  button svg,
+  [role="button"] svg,
+  summary svg {
+    color: var(--color-icon-stroke);
+  }
+
+  button.bg-primary svg,
+  [role="button"].bg-primary svg {
+    color: var(--color-primary-foreground);
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  textarea,
+  select {
+    background-color: var(--color-field);
   }
 }
 

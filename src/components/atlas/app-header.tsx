@@ -7,6 +7,7 @@ import {
   RotateCcw,
   Settings,
 } from "lucide-react";
+import { EditableTitle } from "@/components/atlas/editable-title";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -29,18 +30,23 @@ export function AppHeader({
 }) {
   const hasSession = Boolean(onWander || onCopy || onReset);
   const appName = useUiStore((s) => s.copy.appName);
+  const setCopy = useUiStore((s) => s.setCopy);
 
   return (
     <div className="flex w-full items-center justify-between gap-3">
-      <h1 className="min-w-0 truncate font-display text-lg font-medium tracking-[-0.03em] sm:text-xl">
-        {appName}
-      </h1>
+      <EditableTitle
+        as="h1"
+        value={appName}
+        onChange={(next) => setCopy({ appName: next || "🗺️ MAP" })}
+        className="min-w-0 truncate font-display text-lg font-medium tracking-[-0.03em] sm:text-xl"
+        placeholder="Nom de l’appli"
+      />
       <div className="flex shrink-0 items-center gap-1">
         {hasSession ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
-                variant="ghost"
+                variant="icon"
                 size="icon"
                 className="size-9"
                 aria-label="Session"
@@ -71,7 +77,7 @@ export function AppHeader({
           </DropdownMenu>
         ) : null}
         <Button
-          variant="outline"
+          variant="icon"
           size="icon"
           className="size-9"
           aria-label="Paramètres"
@@ -92,6 +98,7 @@ export function SettingsHeader() {
 
 export function PageHeader({ title }: { title: string }) {
   const appName = useUiStore((s) => s.copy.appName);
+  const setCopy = useUiStore((s) => s.setCopy);
   return (
     <div className="flex w-full items-center justify-between gap-3">
       <h1 className="min-w-0 truncate font-display text-lg font-medium tracking-[-0.03em] sm:text-xl">
@@ -100,7 +107,12 @@ export function PageHeader({ title }: { title: string }) {
       <Button variant="outline" size="sm" asChild>
         <Link to="/">
           <ArrowLeft className="size-4" />
-          {appName}
+          <EditableTitle
+            as="span"
+            value={appName}
+            onChange={(next) => setCopy({ appName: next || "🗺️ MAP" })}
+            className="font-medium"
+          />
         </Link>
       </Button>
     </div>

@@ -8,7 +8,7 @@ export const Route = createFileRoute("/parametres/proprietes")({
 
 function ProprietesSettingsPage() {
   return (
-    <SettingsShell title="Propriétés">
+    <SettingsShell title="Propriétés" titleId="properties">
       <PropManager />
     </SettingsShell>
   );

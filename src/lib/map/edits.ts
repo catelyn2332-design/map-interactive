@@ -1,18 +1,6 @@
-import { coerceValue, DEFAULT_PROPS, readProp, seedProps } from "./props";
+import { coerceValue, DEFAULT_PROPS, readProp } from "./props";
+import { roomsOnFloor, sanitizePropExtras, sanitizePropMap } from "./house";
 import type { PropDef, PropValue, Room, RoomEdit, RoomStep } from "./types";
-
-function asStringMap(raw: unknown): Record<string, PropValue> | undefined {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
-  const out: Record<string, PropValue> = {};
-  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (!key.trim()) continue;
-    if (typeof value === "string") out[key] = value;
-    else if (Array.isArray(value)) {
-      out[key] = value.filter((x): x is string => typeof x === "string");
-    }
-  }
-  return out;
-}
 
 function sanitizeSteps(raw: unknown): RoomStep[] | undefined {
   if (!Array.isArray(raw)) return undefined;
@@ -38,8 +26,10 @@ export function sanitizeEdit(raw: unknown): RoomEdit | null {
   if (typeof t.name === "string" && t.name.trim()) edit.name = t.name.trim();
   if (typeof t.label === "string" && t.label.trim()) edit.label = t.label.trim();
   if (typeof t.description === "string") edit.description = t.description;
-  const props = asStringMap(t.props);
-  if (props && Object.keys(props).length) edit.props = props;
+  const props = sanitizePropMap(t.props);
+  if (Object.keys(props).length) edit.props = props;
+  const extras = sanitizePropExtras(t.propExtras);
+  if (Object.keys(extras).length) edit.propExtras = extras;
   const steps = sanitizeSteps(t.steps);
   if (steps) edit.steps = steps;
   if (Object.keys(edit).length === 0) return null;
@@ -61,15 +51,12 @@ export function mergeRoom(
   edit?: RoomEdit,
   schema: PropDef[] = DEFAULT_PROPS,
 ): Room {
-  const seed = seedProps(room, schema);
   const overlay = edit?.props ?? {};
-  const merged: Record<string, PropValue> = { ...seed, ...overlay };
+  const base = { ...(room.props ?? {}), ...overlay };
   const props: Record<string, PropValue> = {};
-  for (const def of schema) {
-    props[def.id] = readProp(merged, def);
-  }
-  for (const [key, value] of Object.entries(overlay)) {
-    if (props[key] === undefined) props[key] = value;
+  for (const [key, value] of Object.entries(base)) {
+    const def = schema.find((d) => d.id === key);
+    props[key] = def ? coerceValue(def, value) : value;
   }
   return {
     ...room,
@@ -77,6 +64,7 @@ export function mergeRoom(
     label: edit?.label ?? room.label,
     description: edit?.description ?? room.description,
     props,
+    propExtras: edit?.propExtras ?? room.propExtras,
     steps: edit?.steps ?? room.steps ?? [],
   };
 }
@@ -97,9 +85,7 @@ export function resolveFloor(
   rooms: Room[],
   schema: PropDef[] = DEFAULT_PROPS,
 ): Room[] {
-  return rooms
-    .filter((room) => room.floorId === floorId)
-    .map((room) => mergeRoom(room, undefined, schema));
+  return roomsOnFloor(rooms, floorId).map((room) => mergeRoom(room, undefined, schema));
 }
 
 export function coerceRoomProps(

@@ -15,6 +15,7 @@ import {
   sanitizeCharacters,
   sanitizeFixtures,
   sanitizeFloors,
+  sanitizeGroups,
   sanitizeRooms,
   sanitizeTokenMap,
   scrubLegacyWorld,
@@ -25,26 +26,19 @@ import {
   schemasEqual,
   scrubLegacySchema,
 } from "./props";
-import { loadCloudPrefs, saveCloudPrefs } from "./cloud";
 import { noteConfigSaved } from "./saves";
 import {
-  hasCloudSession,
-  isUnauthorizedError,
-  peekCloudSession,
-  rememberCloudSession,
-} from "./cloud-session";
-import {
   applyConfigPayload,
-  applyDedicatedConfig,
   captureConfigPayload,
   flushLivePersist,
-  loadPersistedWorld,
   persistSchema,
   persistWorld,
   useAtlas,
+  ensureRoomSelected,
   type ConfigPayload,
 } from "./store";
-import { DEFAULT_CHROME, DEFAULT_COPY, hasLocalUi, hydrateUi, sanitizeChrome, sanitizeCopy, useUiStore } from "./ui";
+import { DEFAULT_ASSIST, DEFAULT_CHROME, DEFAULT_COPY, DEFAULT_VAULT, hasLocalUi, hydrateUi, sanitizeAssist, sanitizeChrome, sanitizeCopy, sanitizeVault, useUiStore } from "./ui";
+import { applyCoffreToLocal, coffrePayload, openCoffreBoot, pullCoffre, syncLocalToCoffre } from "../progress/sync";
 
 const LS_KEY = "atlas-bellarosa-prefs";
 
@@ -73,43 +67,43 @@ export const usePrefs = create<PrefsState>(() => ({
   cloudSavedAt: null,
 }));
 
+function slimPhotos(raw: unknown) {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => {
+    if (!item || typeof item !== "object") return item;
+    const t = item as Record<string, unknown>;
+    return { id: t.id, name: t.name, src: typeof t.src === "string" ? t.src.length : 0 };
+  });
+}
+
+function slimRooms(rooms: ConfigPayload["rooms"]) {
+  return (rooms ?? []).map((room) => ({
+    ...room,
+    photos: slimPhotos(room.photos),
+  }));
+}
+
+function slimFixtures(fixtures: ConfigPayload["fixtures"]) {
+  return (fixtures ?? []).map((mark) => ({
+    ...mark,
+    photos: slimPhotos(mark.photos),
+  }));
+}
+
 export function fingerprintConfig(payload: ConfigPayload) {
   return JSON.stringify({
     schema: payload.schema,
-    floors: (payload.floors ?? []).map((f) => [f.id, f.name, f.short, f.order]),
-    rooms: (payload.rooms ?? []).map((r) => [
-      r.id,
-      r.floorId,
-      r.name,
-      r.label,
-      r.description,
-      r.poly,
-      r.props,
-      r.steps,
-      r.travel,
-      r.connections,
-      r.photos?.length ?? 0,
-    ]),
-    fixtures: (payload.fixtures ?? []).map((f) => [
-      f.id,
-      f.kind,
-      f.x,
-      f.y,
-      f.rotation,
-      f.length,
-      f.width,
-      f.label,
-      f.description,
-      f.color,
-      f.fill,
-      f.poly,
-      f.photos?.length ?? 0,
-    ]),
+    floors: payload.floors,
+    rooms: slimRooms(payload.rooms),
+    fixtures: slimFixtures(payload.fixtures),
     characters: payload.characters ?? [],
     tokens: payload.tokens ?? {},
+    groups: payload.groups ?? [],
     appearance: payload.appearance,
     copy: payload.copy ?? DEFAULT_COPY,
     chrome: payload.chrome ?? DEFAULT_CHROME,
+    assist: payload.assist ?? DEFAULT_ASSIST,
+    vault: payload.vault ?? DEFAULT_VAULT,
   });
 }
 
@@ -121,9 +115,12 @@ function factoryPayload(): ConfigPayload {
     fixtures: [],
     characters: [],
     tokens: {},
+    groups: [],
     appearance: DEFAULT_THEME,
     copy: DEFAULT_COPY,
     chrome: DEFAULT_CHROME,
+    assist: DEFAULT_ASSIST,
+    vault: DEFAULT_VAULT,
   };
 }
 
@@ -143,14 +140,16 @@ function parseRecord(raw: unknown): PrefsRecord | null {
   const fixturesRaw = sanitizeFixtures(p.fixtures, floorsRaw);
   const charactersRaw = sanitizeCharacters(p.characters);
   const tokensRaw = sanitizeTokenMap(p.tokens, roomsRaw, floorsRaw, charactersRaw);
+  const groupsRaw = sanitizeGroups(p.groups);
   const world = isLegacyFactoryWorld(floorsRaw, roomsRaw)
-    ? scrubLegacyWorld(floorsRaw, roomsRaw, fixturesRaw, charactersRaw, tokensRaw)
+    ? scrubLegacyWorld(floorsRaw, roomsRaw, fixturesRaw, charactersRaw, tokensRaw, groupsRaw)
     : {
         floors: floorsRaw,
         rooms: roomsRaw,
         fixtures: fixturesRaw,
         characters: charactersRaw,
         tokens: tokensRaw,
+        groups: groupsRaw,
       };
   const schemaRaw = sanitizeSchema(p.schema);
   return {
@@ -162,9 +161,12 @@ function parseRecord(raw: unknown): PrefsRecord | null {
       fixtures: world.fixtures,
       characters: world.characters,
       tokens: world.tokens,
+      groups: world.groups,
       appearance: p.appearance,
       copy: sanitizeCopy(p.copy),
       chrome: sanitizeChrome(p.chrome),
+      assist: sanitizeAssist(p.assist),
+      vault: sanitizeVault(p.vault),
     },
   };
 }
@@ -225,13 +227,22 @@ async function writeIdb(record: PrefsRecord): Promise<boolean> {
   });
 }
 
-function newest(records: Array<PrefsRecord | null>): PrefsRecord | null {
-  const list = records.filter((r): r is PrefsRecord => Boolean(r));
-  const rich = list.filter((r) => !isFactoryConfig(r.payload));
-  const pool = rich.length ? rich : list;
+function pickSaved(
+  vault: PrefsRecord | null,
+  local: PrefsRecord | null,
+  idb: PrefsRecord | null,
+): PrefsRecord | null {
+  const bakedFp = fingerprintConfig(coffrePayload() as ConfigPayload);
+  const isBaked = (r: PrefsRecord | null) =>
+    Boolean(r && fingerprintConfig(r.payload) === bakedFp);
+  if (vault && local) {
+    if (isBaked(local) && !isBaked(vault)) return vault;
+    if (vault.savedAt + 50 >= local.savedAt) return vault;
+  }
+  const pool = [vault, local, idb].filter((r): r is PrefsRecord => Boolean(r));
   let best: PrefsRecord | null = null;
   for (const rec of pool) {
-    if (!best || rec.savedAt >= best.savedAt) best = rec;
+    if (!best || rec.savedAt > best.savedAt) best = rec;
   }
   return best;
 }
@@ -261,7 +272,7 @@ function applyCommitted(
     if (theme) persistTheme(theme);
   }
   if (!keepLocalUi) {
-    hydrateUi({ copy: record.payload.copy, chrome: record.payload.chrome });
+    hydrateUi({ copy: record.payload.copy, chrome: record.payload.chrome, assist: record.payload.assist, vault: record.payload.vault });
   }
   flushLivePersist();
   rememberCommitted(record);
@@ -279,6 +290,7 @@ function tryRecover(record: PrefsRecord): boolean {
       persistWorld(record.payload.floors, record.payload.rooms, true, record.payload.fixtures, {
         characters: record.payload.characters,
         tokens: record.payload.tokens,
+        groups: record.payload.groups,
       });
       return true;
     }
@@ -296,6 +308,7 @@ function recoverMissingSlices(record: PrefsRecord): boolean {
     fixtures: ConfigPayload["fixtures"];
     characters: ConfigPayload["characters"];
     tokens: ConfigPayload["tokens"];
+    groups: ConfigPayload["groups"];
     filters: Record<string, string>;
   }> = {};
   const liveSchemaFactory = schemasEqual(live.schema ?? [], cloneSchema());
@@ -309,18 +322,21 @@ function recoverMissingSlices(record: PrefsRecord): boolean {
     live.rooms ?? [],
     live.fixtures ?? [],
     live.characters ?? [],
+    live.groups ?? [],
   );
   const savedFloors = saved.floors ?? factoryFloors();
   const savedRooms = saved.rooms ?? [];
   const savedFixtures = saved.fixtures ?? [];
   const savedCharacters = saved.characters ?? [];
   const savedTokens = saved.tokens ?? {};
+  const savedGroups = saved.groups ?? [];
   const savedWorld = scrubLegacyWorld(
     savedFloors,
     savedRooms,
     savedFixtures,
     savedCharacters,
     savedTokens,
+    savedGroups,
   );
   if (
     liveWorldFactory &&
@@ -329,6 +345,7 @@ function recoverMissingSlices(record: PrefsRecord): boolean {
       savedWorld.rooms,
       savedWorld.fixtures,
       savedWorld.characters,
+      savedWorld.groups,
     )
   ) {
     patch.floors = savedWorld.floors;
@@ -336,6 +353,7 @@ function recoverMissingSlices(record: PrefsRecord): boolean {
     patch.fixtures = savedWorld.fixtures;
     patch.characters = savedWorld.characters;
     patch.tokens = savedWorld.tokens;
+    patch.groups = savedWorld.groups;
   }
   if (
     !patch.schema &&
@@ -352,6 +370,7 @@ function recoverMissingSlices(record: PrefsRecord): boolean {
     persistWorld(s.floors, s.rooms, true, s.fixtures, {
       characters: s.characters,
       tokens: s.tokens,
+      groups: s.groups,
     });
   }
   flushLivePersist();
@@ -367,7 +386,7 @@ export function isConfigDirty() {
 }
 
 export function useConfigDirty() {
-  const lastSaved = usePrefs((s) => s.lastSaved);
+  const lastSavedAt = usePrefs((s) => s.lastSavedAt);
   const loaded = usePrefs((s) => s.loaded);
   const schema = useAtlas((s) => s.schema);
   const floors = useAtlas((s) => s.floors);
@@ -375,10 +394,41 @@ export function useConfigDirty() {
   const fixtures = useAtlas((s) => s.fixtures);
   const characters = useAtlas((s) => s.characters);
   const tokens = useAtlas((s) => s.tokens);
+  const groups = useAtlas((s) => s.groups);
   const appearance = useThemeStore((s) => s.theme);
   const copy = useUiStore((s) => s.copy);
   const chrome = useUiStore((s) => s.chrome);
-  void loaded;
+  if (!loaded) return false;
+  const last = usePrefs.getState().lastSaved;
+  if (!last) {
+    return !isFactoryConfig({
+      schema,
+      floors,
+      rooms,
+      fixtures,
+      characters,
+      tokens,
+      groups,
+      appearance,
+      copy,
+      chrome,
+    });
+  }
+  if (
+    last.schema === schema &&
+    last.floors === floors &&
+    last.rooms === rooms &&
+    last.fixtures === fixtures &&
+    last.characters === characters &&
+    last.tokens === tokens &&
+    last.groups === groups &&
+    last.appearance === appearance &&
+    last.copy === copy &&
+    last.chrome === chrome
+  ) {
+    return false;
+  }
+  void lastSavedAt;
   const current: ConfigPayload = {
     schema,
     floors,
@@ -386,75 +436,48 @@ export function useConfigDirty() {
     fixtures,
     characters,
     tokens,
+    groups,
     appearance,
     copy,
     chrome,
   };
-  const baseline = lastSaved ?? factoryPayload();
-  return fingerprintConfig(current) !== fingerprintConfig(baseline);
+  return fingerprintConfig(current) !== fingerprintConfig(last);
 }
 
-async function persistLocal(record: PrefsRecord): Promise<boolean> {
+function persistRecordLocal(record: PrefsRecord): boolean {
   const lsOk = writeLocal(record);
-  const idbOk = await writeIdb(record);
+  void writeIdb(record);
   const theme = sanitizeTheme(record.payload.appearance);
   if (theme) persistTheme(theme);
   persistSchema(record.payload.schema, true);
   persistWorld(record.payload.floors, record.payload.rooms, true, record.payload.fixtures, {
     characters: record.payload.characters,
     tokens: record.payload.tokens,
+    groups: record.payload.groups,
   });
-  hydrateUi({ copy: record.payload.copy, chrome: record.payload.chrome });
+  hydrateUi({ copy: record.payload.copy, chrome: record.payload.chrome, assist: record.payload.assist, vault: record.payload.vault });
   flushLivePersist();
-  return lsOk || idbOk;
+  return lsOk;
 }
 
 export type CloudWrite = "ok" | "skipped" | "failed";
 
 async function persistCloud(record: PrefsRecord): Promise<CloudWrite> {
-  const signedIn =
-    peekCloudSession() === true ||
-    (peekCloudSession() !== false && (await hasCloudSession()));
-  if (!signedIn) {
-    usePrefs.setState({ cloud: "signed-out" });
-    return "skipped";
-  }
-  usePrefs.setState({ cloud: "syncing" });
   try {
-    const res = await Promise.race([
-      saveCloudPrefs({
-        data: {
-          savedAt: record.savedAt,
-          payloadJson: JSON.stringify(record.payload),
-        },
-      }),
-      new Promise<{ ok?: boolean }>((resolve) =>
-        setTimeout(() => resolve({ ok: false }), 4000),
-      ),
-    ]);
-    if (res && (res as { ok?: boolean }).ok) {
-      lastCloudFp = fingerprintConfig(record.payload);
-      if (import.meta.hot) import.meta.hot.data.lastCloudFp = lastCloudFp;
-      usePrefs.setState({ cloud: "synced", cloudSavedAt: record.savedAt });
-      return "ok";
-    }
-    usePrefs.setState({ cloud: "error" });
-    return "failed";
-  } catch (err) {
-    if (isUnauthorizedError(err)) {
-      rememberCloudSession(false);
-      usePrefs.setState({ cloud: "signed-out" });
-      return "skipped";
-    }
+    syncLocalToCoffre(record.payload);
+    lastCloudFp = fingerprintConfig(record.payload);
+    usePrefs.setState({ cloud: "synced", cloudSavedAt: record.savedAt });
+    return "ok";
+  } catch {
     usePrefs.setState({ cloud: "error" });
     return "failed";
   }
 }
 
 async function persistRecord(record: PrefsRecord): Promise<boolean> {
-  const localOk = await persistLocal(record);
+  const lsOk = persistRecordLocal(record);
   await persistCloud(record);
-  return localOk;
+  return lsOk;
 }
 
 export async function adoptPreferences(payload: ConfigPayload): Promise<boolean> {
@@ -471,44 +494,46 @@ let hydratePromise: Promise<void> | null = null;
 
 export function hydratePrefs(): Promise<void> {
   if (typeof window === "undefined") return Promise.resolve();
-  if (usePrefs.getState().loaded) {
-    return Promise.resolve();
+  if (!hydratePromise) {
+    applyLocalPrefs();
+    hydratePromise = doHydratePrefs();
   }
-  if (!hydratePromise) hydratePromise = doHydratePrefs();
   return hydratePromise;
+}
+
+function applyLocalPrefs() {
+  const local = readLocal();
+  if (local) {
+    rememberCommitted(local);
+    tryRecover(local);
+    return local;
+  }
+  usePrefs.setState({ loaded: true });
+  return null;
 }
 
 async function doHydratePrefs() {
   startPrefsGuards();
   try {
-    const local = readLocal();
-    if (local) {
-      rememberCommitted(local);
-      tryRecover(local);
-    }
+    const local = applyLocalPrefs();
 
     let server: PrefsRecord | null = null;
     let idb: PrefsRecord | null = null;
     let catalogSchema: unknown = null;
     let catalogWorld: unknown = null;
     try {
-      const signedIn = await hasCloudSession();
-      usePrefs.setState({ cloud: signedIn ? "unknown" : "signed-out" });
-      const [cloud, remote, catSchema, catWorld] = await Promise.all([
-        signedIn ? loadCloudPrefs().catch((err) => {
-          if (isUnauthorizedError(err)) rememberCloudSession(false);
-          return null;
-        }) : Promise.resolve(null),
+      const [vault, remote, catSchema, catWorld] = await Promise.all([
+        Promise.race([
+          pullCoffre().catch(() => null),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500)),
+        ]),
         readIdb(),
         getCatalog("schema"),
         getCatalog("world"),
       ]);
       try {
-        server = cloud
-          ? parseRecord({
-              savedAt: cloud.savedAt,
-              payload: JSON.parse(cloud.payloadJson),
-            })
+        server = vault
+          ? parseRecord({ savedAt: vault.savedAt, payload: vault.payload })
           : null;
       } catch {
         server = null;
@@ -520,10 +545,35 @@ async function doHydratePrefs() {
       /* keep local */
     }
 
-    const best = newest([server, local, idb]);
+    const bundled = parseRecord({
+      savedAt: 1,
+      payload: coffrePayload(),
+    });
+    const best = pickSaved(server, local, idb) ?? bundled;
     if (best) {
-      rememberCommitted(best);
-      tryRecover(best);
+      const live = captureConfigPayload();
+      const sameWorld =
+        JSON.stringify({
+          floors: live.floors,
+          rooms: slimRooms(live.rooms),
+          fixtures: slimFixtures(live.fixtures),
+        }) ===
+        JSON.stringify({
+          floors: best.payload.floors,
+          rooms: slimRooms(best.payload.rooms),
+          fixtures: slimFixtures(best.payload.fixtures),
+        });
+      if (!sameWorld) {
+        applyCommitted(best, { appearance: true, ui: true });
+        persistSchema(best.payload.schema, true);
+        persistWorld(best.payload.floors, best.payload.rooms, true, best.payload.fixtures, {
+          characters: best.payload.characters,
+          tokens: best.payload.tokens,
+          groups: best.payload.groups,
+        });
+      } else {
+        rememberCommitted(best);
+      }
       try {
         writeLocal(best);
         void writeIdb(best);
@@ -535,7 +585,7 @@ async function doHydratePrefs() {
     }
 
     const liveAfter = captureConfigPayload();
-    if (Array.isArray(catalogSchema)) {
+    if (Array.isArray(catalogSchema) && !server && !local) {
       const schema = scrubLegacySchema(sanitizeSchema(catalogSchema));
       if (
         schemasEqual(liveAfter.schema, cloneSchema()) &&
@@ -545,18 +595,19 @@ async function doHydratePrefs() {
         persistSchema(schema, true);
       }
     }
-    if (catalogWorld && typeof catalogWorld === "object") {
+    if (catalogWorld && typeof catalogWorld === "object" && !server && !local) {
       const rec = catalogWorld as Record<string, unknown>;
       const floors = sanitizeFloors(rec.floors);
       const rooms = sanitizeRooms(rec.rooms, floors);
       const fixtures = sanitizeFixtures(rec.fixtures, floors);
       const characters = sanitizeCharacters(rec.characters);
       const tokens = sanitizeTokenMap(rec.tokens, rooms, floors, characters);
-      const world = scrubLegacyWorld(floors, rooms, fixtures, characters, tokens);
+      const groups = sanitizeGroups(rec.groups);
+      const world = scrubLegacyWorld(floors, rooms, fixtures, characters, tokens, groups);
       const live = useAtlas.getState();
       if (
-        isFactoryWorld(live.floors, live.rooms, live.fixtures, live.characters) &&
-        !isFactoryWorld(world.floors, world.rooms, world.fixtures, world.characters)
+        isFactoryWorld(live.floors, live.rooms, live.fixtures, live.characters, live.groups) &&
+        !isFactoryWorld(world.floors, world.rooms, world.fixtures, world.characters, world.groups)
       ) {
         useAtlas.setState({
           floors: world.floors,
@@ -564,46 +615,38 @@ async function doHydratePrefs() {
           fixtures: world.fixtures,
           characters: world.characters,
           tokens: world.tokens,
+          groups: world.groups,
         });
         persistWorld(world.floors, world.rooms, true, world.fixtures, {
           characters: world.characters,
           tokens: world.tokens,
+          groups: world.groups,
         });
       }
     }
   } catch {
     usePrefs.setState({ loaded: true });
   } finally {
-    try {
-    const live = captureConfigPayload();
-    const liveRich = !isFactoryWorld(
-      live.floors ?? [],
-      live.rooms ?? [],
-      live.fixtures ?? [],
-      live.characters ?? [],
-    );
-    if (!liveRich) {
-      applyDedicatedConfig();
+    const live = useAtlas.getState();
+    if (live.rooms.length === 0 && live.fixtures.length === 0) {
+      applyCoffreToLocal((patch) => {
+        useAtlas.setState({ ...patch, filters: {}, tool: "select" });
+      });
     }
-    } catch {
-      /* keep going */
-    }
+    openCoffreBoot();
     autoApplyAllowed = false;
     if (typeof document !== "undefined") {
       document.documentElement.dataset.prefsHydrated = "1";
     }
+    ensureRoomSelected();
   }
 }
 
 export async function restoreCloudPreferences(): Promise<boolean> {
-  if (!(await hasCloudSession())) return false;
   try {
-    const cloud = await loadCloudPrefs();
-    const record = cloud
-      ? parseRecord({
-          savedAt: cloud.savedAt,
-          payload: JSON.parse(cloud.payloadJson),
-        })
+    const vault = await pullCoffre();
+    const record = vault
+      ? parseRecord({ savedAt: vault.savedAt, payload: vault.payload })
       : null;
     if (!record) return false;
     applyCommitted(record, { appearance: true, ui: true });
@@ -611,16 +654,11 @@ export async function restoreCloudPreferences(): Promise<boolean> {
     void writeIdb(record);
     usePrefs.setState({ cloud: "synced", cloudSavedAt: record.savedAt });
     return true;
-  } catch (err) {
-    if (isUnauthorizedError(err)) {
-      rememberCloudSession(false);
-      usePrefs.setState({ cloud: "signed-out" });
-    }
+  } catch {
     return false;
   }
 }
 
-/** Local snapshot. Cloud is attempted only when a session exists; local success is enough. */
 export async function savePreferences(): Promise<boolean> {
   if (typeof window === "undefined") return false;
   const payload = captureConfigPayload();
@@ -643,6 +681,7 @@ export async function savePreferences(): Promise<boolean> {
       saving: false,
     });
     noteConfigSaved(payload);
+    lastCloudFp = fingerprintConfig(payload);
     return true;
   } catch {
     usePrefs.setState({ saving: false });
@@ -650,12 +689,12 @@ export async function savePreferences(): Promise<boolean> {
   }
 }
 
-/** Account copy only. Returns false if signed out or the row never landed. */
+/** Account copy only. */
 export async function saveCloudPreferences(): Promise<CloudWrite> {
   if (typeof window === "undefined") return "failed";
   const payload = captureConfigPayload();
   const record: PrefsRecord = { savedAt: Date.now(), payload };
-  await persistLocal(record);
+  persistRecordLocal(record);
   const cloud = await persistCloud(record);
   if (cloud === "ok") {
     usePrefs.setState({
@@ -665,6 +704,11 @@ export async function saveCloudPreferences(): Promise<CloudWrite> {
     noteConfigSaved(payload);
   }
   return cloud;
+}
+
+/** Call after a session appears so the live plan is copied immediately. */
+export function notifyCloudSession(_signedIn: boolean) {
+  void flushCloudAutosave();
 }
 
 export function recoverPrefsIfWiped() {
@@ -685,10 +729,8 @@ let guardsStarted = false;
 function startPrefsGuards() {
   if (typeof window === "undefined" || guardsStarted) return;
   guardsStarted = true;
-  window.addEventListener("beforeunload", (event) => {
-    if (!isConfigDirty()) return;
-    event.preventDefault();
-    event.returnValue = "";
+  window.addEventListener("beforeunload", () => {
+    void flushCloudAutosave();
   });
   window.addEventListener("storage", (event) => {
     if (event.key !== LS_KEY || !event.newValue) return;
@@ -704,8 +746,8 @@ function startPrefsGuards() {
 }
 
 let cloudTimer: ReturnType<typeof setTimeout> | undefined;
-let cloudAutosaveStarted = import.meta.hot?.data.cloudAutosaveStarted === true;
-let lastCloudFp = (import.meta.hot?.data.lastCloudFp as string) ?? "";
+let cloudAutosaveStarted = false;
+let lastCloudFp = "";
 let cloudBusy = false;
 
 async function flushCloudAutosave() {
@@ -714,66 +756,47 @@ async function flushCloudAutosave() {
     cloudTimer = undefined;
   }
   if (cloudBusy) return;
-  if (peekCloudSession() === false) return;
-  if (peekCloudSession() !== true && !(await hasCloudSession())) return;
   const payload = captureConfigPayload();
   const last = usePrefs.getState().lastSaved;
-  if (isFactoryConfig(payload)) {
-    if (last && !isFactoryConfig(last)) return;
-    const existing = loadPersistedWorld();
-    if (
-      existing &&
-      !isFactoryWorld(
-        existing.floors,
-        existing.rooms,
-        existing.fixtures,
-        existing.characters,
-      )
-    )
-      return;
+  if (isFactoryConfig(payload) && last && !isFactoryConfig(last)) {
+    return;
   }
   const fp = fingerprintConfig(payload);
   if (fp === lastCloudFp) return;
   cloudBusy = true;
+  usePrefs.setState({ saving: true, cloud: "syncing" });
+  const record: PrefsRecord = { savedAt: Date.now(), payload };
   try {
-    const record: PrefsRecord = { savedAt: Date.now(), payload };
-    const cloud = await persistCloud(record);
-    if (cloud === "ok") {
-      rememberCommitted(record);
-      noteConfigSaved(payload);
-    }
+    writeLocal(record);
+    void writeIdb(record);
+    rememberCommitted(record);
+    noteConfigSaved(payload);
+    lastCloudFp = fp;
+    syncLocalToCoffre(payload);
+    usePrefs.setState({
+      saving: false,
+      cloud: "synced",
+      cloudSavedAt: record.savedAt,
+    });
   } catch {
-    /* signed out or network — silent */
+    usePrefs.setState({ saving: false, cloud: "error" });
   } finally {
     cloudBusy = false;
   }
 }
 
 function scheduleCloudSave() {
-  if (peekCloudSession() === false) return;
   if (cloudTimer) clearTimeout(cloudTimer);
   cloudTimer = setTimeout(() => {
     void flushCloudAutosave();
-  }, 1400);
+  }, 600);
 }
 
-/** Call after a session appears so the live plan is copied immediately. */
-export function notifyCloudSession(signedIn: boolean) {
-  rememberCloudSession(signedIn);
-  if (!signedIn) {
-    usePrefs.setState({ cloud: "signed-out" });
-    return;
-  }
-  void flushCloudAutosave();
-}
-
-/** Debounced cloud copy of the live plan when a session is connected. */
+/** Debounced copy of the live sandbox (plan + prefs) to the account vault. */
 export function startCloudAutosave() {
   if (typeof window === "undefined" || cloudAutosaveStarted) return;
   cloudAutosaveStarted = true;
-  if (import.meta.hot) import.meta.hot.data.cloudAutosaveStarted = true;
   lastCloudFp = fingerprintConfig(captureConfigPayload());
-  if (import.meta.hot) import.meta.hot.data.lastCloudFp = lastCloudFp;
   useAtlas.subscribe((s, prev) => {
     if (
       s.schema === prev.schema &&
@@ -787,14 +810,12 @@ export function startCloudAutosave() {
     scheduleCloudSave();
   });
   useUiStore.subscribe(() => scheduleCloudSave());
+  useThemeStore.subscribe(() => scheduleCloudSave());
   window.addEventListener("pagehide", () => {
     void flushCloudAutosave();
   });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") void flushCloudAutosave();
   });
-  window.setTimeout(() => {
-    void flushCloudAutosave();
-  }, 1800);
 }
 

@@ -1,8 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { AtlasApp } from "@/components/atlas/atlas-app";
 
-export const Route = createFileRoute("/")({ component: Home });
+type Search = { e?: string };
+
+export const Route = createFileRoute("/")({
+  validateSearch: (raw: Record<string, unknown>): Search => ({
+    e: typeof raw.e === "string" && raw.e.length > 0 ? raw.e : undefined,
+  }),
+  component: Home,
+});
 
 function Home() {
-  return <AtlasApp />;
+  const { e } = Route.useSearch();
+  return <AtlasApp urlFloor={e} />;
 }

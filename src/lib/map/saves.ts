@@ -15,8 +15,8 @@ export const SAVE_FILE_KIND = "atlas-bellarosa-save";
 export const SAVE_FILE_VERSION = 2;
 const LS_KEY = "atlas-bellarosa-saves";
 const MAX_NAMED = 24;
-const MAX_AUTO = 4;
-const AUTO_WAIT_MS = 4000;
+const MAX_AUTO = 12;
+const AUTO_WAIT_MS = 900;
 
 export type SaveRecord = {
   id: string;
@@ -70,43 +70,42 @@ function asConfig(raw: unknown): ConfigPayload | null {
     fixtures: (source.fixtures as ConfigPayload["fixtures"]) ?? [],
     characters: (source.characters as ConfigPayload["characters"]) ?? [],
     tokens: (source.tokens as ConfigPayload["tokens"]) ?? {},
+    groups: (source.groups as ConfigPayload["groups"]) ?? [],
     appearance: source.appearance,
     copy: source.copy,
     chrome: source.chrome,
   };
 }
 
-function fingerprint(payload: ConfigPayload) {
-  return JSON.stringify({
-    schema: payload.schema?.map((d) => d.id),
-    floors: payload.floors?.map((f) => [f.id, f.name]),
-    rooms: payload.rooms?.map((r) => [r.id, r.name, r.description, r.photos?.length]),
-    fixtures: (payload.fixtures ?? []).map((f) => [
-      f.id,
-      f.kind,
-      f.label,
-      f.photos?.length,
-    ]),
-    characters: payload.characters ?? [],
-    tokens: payload.tokens ?? {},
-    appearance: payload.appearance,
-    copy: payload.copy,
-    chrome: payload.chrome,
+function slimPhotos(raw: unknown) {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => {
+    if (!item || typeof item !== "object") return item;
+    const t = item as Record<string, unknown>;
+    return { id: t.id, name: t.name, src: typeof t.src === "string" ? t.src.length : 0 };
   });
 }
 
-function slimPayload(payload: ConfigPayload): ConfigPayload {
-  return {
-    ...payload,
-    rooms: (payload.rooms ?? []).map((r) => ({
-      ...r,
-      photos: r.photos?.map((p) => ({ id: p.id, src: "", name: p.name })),
+function fingerprint(payload: ConfigPayload) {
+  return JSON.stringify({
+    schema: payload.schema,
+    floors: payload.floors,
+    rooms: (payload.rooms ?? []).map((room) => ({
+      ...room,
+      photos: slimPhotos(room.photos),
     })),
-    fixtures: (payload.fixtures ?? []).map((f) => ({
-      ...f,
-      photos: f.photos?.map((p) => ({ id: p.id, src: "", name: p.name })),
+    fixtures: (payload.fixtures ?? []).map((mark) => ({
+      ...mark,
+      photos: slimPhotos(mark.photos),
     })),
-  };
+    characters: payload.characters ?? [],
+    tokens: payload.tokens ?? {},
+    groups: payload.groups ?? [],
+    appearance: payload.appearance,
+    copy: payload.copy,
+    chrome: payload.chrome,
+    assist: payload.assist,
+  });
 }
 
 function mergeById(list: SaveRecord[]) {
@@ -437,7 +436,7 @@ function journalAutosave() {
     name: "Copie automatique",
     kind: "auto",
     savedAt: Date.now(),
-    payload: slimPayload(payload),
+    payload,
   };
   const state = useSaveCatalog.getState();
   setCatalog({
@@ -446,9 +445,9 @@ function journalAutosave() {
   });
 }
 
-let lastFingerprint = (import.meta.hot?.data.saveFp as string) ?? "";
+let lastFingerprint = "";
 let autoTimer: ReturnType<typeof setTimeout> | undefined;
-let autosaveStarted = import.meta.hot?.data.autosaveStarted === true;
+let autosaveStarted = false;
 
 function scheduleAutosave() {
   if (!isPersistReady()) return;
@@ -459,7 +458,6 @@ function scheduleAutosave() {
 export function startAutosave() {
   if (typeof window === "undefined" || autosaveStarted) return;
   autosaveStarted = true;
-  if (import.meta.hot) import.meta.hot.data.autosaveStarted = true;
   lastFingerprint = fingerprint(captureConfigPayload());
   useAtlas.subscribe((s, prev) => {
     if (

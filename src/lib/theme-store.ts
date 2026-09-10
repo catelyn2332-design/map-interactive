@@ -17,6 +17,9 @@ export function sanitizeTheme(raw: unknown): Theme | null {
   const foreground = isHex(t.foreground ?? "") ? t.foreground! : "";
   if (!background || !foreground) return null;
   const card = isHex(t.card ?? "") ? t.card! : mix(background, foreground, 0.06);
+  const secondary = isHex(t.secondary ?? "")
+    ? t.secondary!
+    : mix(card, foreground, 0.08);
   return {
     background,
     foreground,
@@ -30,9 +33,14 @@ export function sanitizeTheme(raw: unknown): Theme | null {
     border: isHex(t.border ?? "")
       ? t.border!
       : mix(background, foreground, 0.18),
-    secondary: isHex(t.secondary ?? "")
-      ? t.secondary!
-      : mix(card, foreground, 0.08),
+    secondary,
+    field: isHex(t.field ?? "") ? t.field! : mix(card, "#ffffff", 0.32),
+    icon: isHex(t.icon ?? "") ? t.icon! : mix(card, foreground, 0.12),
+    iconStroke: isHex(t.iconStroke ?? "")
+      ? t.iconStroke!
+      : isHex(t.mutedForeground ?? "")
+        ? t.mutedForeground!
+        : mix(foreground, background, 0.15),
     displayFont: t.displayFont || DEFAULT_THEME.displayFont,
     sansFont: t.sansFont || DEFAULT_THEME.sansFont,
     radius:

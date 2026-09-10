@@ -14,10 +14,15 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as ProprietesRouteImport } from './routes/proprietes'
 import { Route as SauvegardesRouteImport } from './routes/sauvegardes'
 import { Route as ParametresIndexRouteImport } from './routes/parametres/index'
+import { Route as ParametresAleatoireRouteImport } from './routes/parametres/aleatoire'
 import { Route as ParametresCarteRouteImport } from './routes/parametres/carte'
+import { Route as ParametresCoffreRouteImport } from './routes/parametres/coffre'
 import { Route as ParametresCompteRouteImport } from './routes/parametres/compte'
 import { Route as ParametresInterfaceRouteImport } from './routes/parametres/interface'
 import { Route as ParametresProprietesRouteImport } from './routes/parametres/proprietes'
+import { Route as ApiAtlasCloudRouteImport } from './routes/api/atlas/cloud'
+import { Route as ApiAtlasFilesRouteImport } from './routes/api/atlas/files'
+import { Route as ApiAtlasImproviseRouteImport } from './routes/api/atlas/improvise'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 
 const IndexRoute = IndexRouteImport.update({
@@ -45,9 +50,19 @@ const ParametresIndexRoute = ParametresIndexRouteImport.update({
   path: '/parametres/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ParametresAleatoireRoute = ParametresAleatoireRouteImport.update({
+  id: '/parametres/aleatoire',
+  path: '/parametres/aleatoire',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ParametresCarteRoute = ParametresCarteRouteImport.update({
   id: '/parametres/carte',
   path: '/parametres/carte',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ParametresCoffreRoute = ParametresCoffreRouteImport.update({
+  id: '/parametres/coffre',
+  path: '/parametres/coffre',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ParametresCompteRoute = ParametresCompteRouteImport.update({
@@ -65,6 +80,21 @@ const ParametresProprietesRoute = ParametresProprietesRouteImport.update({
   path: '/parametres/proprietes',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAtlasCloudRoute = ApiAtlasCloudRouteImport.update({
+  id: '/api/atlas/cloud',
+  path: '/api/atlas/cloud',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAtlasFilesRoute = ApiAtlasFilesRouteImport.update({
+  id: '/api/atlas/files',
+  path: '/api/atlas/files',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAtlasImproviseRoute = ApiAtlasImproviseRouteImport.update({
+  id: '/api/atlas/improvise',
+  path: '/api/atlas/improvise',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -76,11 +106,16 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/proprietes': typeof ProprietesRoute
   '/sauvegardes': typeof SauvegardesRoute
+  '/parametres/aleatoire': typeof ParametresAleatoireRoute
   '/parametres/carte': typeof ParametresCarteRoute
+  '/parametres/coffre': typeof ParametresCoffreRoute
   '/parametres/compte': typeof ParametresCompteRoute
   '/parametres/interface': typeof ParametresInterfaceRoute
   '/parametres/proprietes': typeof ParametresProprietesRoute
   '/parametres/': typeof ParametresIndexRoute
+  '/api/atlas/cloud': typeof ApiAtlasCloudRoute
+  '/api/atlas/files': typeof ApiAtlasFilesRoute
+  '/api/atlas/improvise': typeof ApiAtlasImproviseRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesByTo {
@@ -88,11 +123,16 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/proprietes': typeof ProprietesRoute
   '/sauvegardes': typeof SauvegardesRoute
+  '/parametres/aleatoire': typeof ParametresAleatoireRoute
   '/parametres/carte': typeof ParametresCarteRoute
+  '/parametres/coffre': typeof ParametresCoffreRoute
   '/parametres/compte': typeof ParametresCompteRoute
   '/parametres/interface': typeof ParametresInterfaceRoute
   '/parametres/proprietes': typeof ParametresProprietesRoute
   '/parametres': typeof ParametresIndexRoute
+  '/api/atlas/cloud': typeof ApiAtlasCloudRoute
+  '/api/atlas/files': typeof ApiAtlasFilesRoute
+  '/api/atlas/improvise': typeof ApiAtlasImproviseRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesById {
@@ -101,11 +141,16 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/proprietes': typeof ProprietesRoute
   '/sauvegardes': typeof SauvegardesRoute
+  '/parametres/aleatoire': typeof ParametresAleatoireRoute
   '/parametres/carte': typeof ParametresCarteRoute
+  '/parametres/coffre': typeof ParametresCoffreRoute
   '/parametres/compte': typeof ParametresCompteRoute
   '/parametres/interface': typeof ParametresInterfaceRoute
   '/parametres/proprietes': typeof ParametresProprietesRoute
   '/parametres/': typeof ParametresIndexRoute
+  '/api/atlas/cloud': typeof ApiAtlasCloudRoute
+  '/api/atlas/files': typeof ApiAtlasFilesRoute
+  '/api/atlas/improvise': typeof ApiAtlasImproviseRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRouteTypes {
@@ -115,11 +160,16 @@ export interface FileRouteTypes {
     | '/login'
     | '/proprietes'
     | '/sauvegardes'
+    | '/parametres/aleatoire'
     | '/parametres/carte'
+    | '/parametres/coffre'
     | '/parametres/compte'
     | '/parametres/interface'
     | '/parametres/proprietes'
     | '/parametres/'
+    | '/api/atlas/cloud'
+    | '/api/atlas/files'
+    | '/api/atlas/improvise'
     | '/api/auth/$'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -127,11 +177,16 @@ export interface FileRouteTypes {
     | '/login'
     | '/proprietes'
     | '/sauvegardes'
+    | '/parametres/aleatoire'
     | '/parametres/carte'
+    | '/parametres/coffre'
     | '/parametres/compte'
     | '/parametres/interface'
     | '/parametres/proprietes'
     | '/parametres'
+    | '/api/atlas/cloud'
+    | '/api/atlas/files'
+    | '/api/atlas/improvise'
     | '/api/auth/$'
   id:
     | '__root__'
@@ -139,11 +194,16 @@ export interface FileRouteTypes {
     | '/login'
     | '/proprietes'
     | '/sauvegardes'
+    | '/parametres/aleatoire'
     | '/parametres/carte'
+    | '/parametres/coffre'
     | '/parametres/compte'
     | '/parametres/interface'
     | '/parametres/proprietes'
     | '/parametres/'
+    | '/api/atlas/cloud'
+    | '/api/atlas/files'
+    | '/api/atlas/improvise'
     | '/api/auth/$'
   fileRoutesById: FileRoutesById
 }
@@ -152,11 +212,16 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   ProprietesRoute: typeof ProprietesRoute
   SauvegardesRoute: typeof SauvegardesRoute
+  ParametresAleatoireRoute: typeof ParametresAleatoireRoute
   ParametresCarteRoute: typeof ParametresCarteRoute
+  ParametresCoffreRoute: typeof ParametresCoffreRoute
   ParametresCompteRoute: typeof ParametresCompteRoute
   ParametresInterfaceRoute: typeof ParametresInterfaceRoute
   ParametresProprietesRoute: typeof ParametresProprietesRoute
   ParametresIndexRoute: typeof ParametresIndexRoute
+  ApiAtlasCloudRoute: typeof ApiAtlasCloudRoute
+  ApiAtlasFilesRoute: typeof ApiAtlasFilesRoute
+  ApiAtlasImproviseRoute: typeof ApiAtlasImproviseRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
 }
 
@@ -197,11 +262,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ParametresIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/parametres/aleatoire': {
+      id: '/parametres/aleatoire'
+      path: '/parametres/aleatoire'
+      fullPath: '/parametres/aleatoire'
+      preLoaderRoute: typeof ParametresAleatoireRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/parametres/carte': {
       id: '/parametres/carte'
       path: '/parametres/carte'
       fullPath: '/parametres/carte'
       preLoaderRoute: typeof ParametresCarteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/parametres/coffre': {
+      id: '/parametres/coffre'
+      path: '/parametres/coffre'
+      fullPath: '/parametres/coffre'
+      preLoaderRoute: typeof ParametresCoffreRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/parametres/compte': {
@@ -225,6 +304,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ParametresProprietesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/atlas/cloud': {
+      id: '/api/atlas/cloud'
+      path: '/api/atlas/cloud'
+      fullPath: '/api/atlas/cloud'
+      preLoaderRoute: typeof ApiAtlasCloudRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/atlas/files': {
+      id: '/api/atlas/files'
+      path: '/api/atlas/files'
+      fullPath: '/api/atlas/files'
+      preLoaderRoute: typeof ApiAtlasFilesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/atlas/improvise': {
+      id: '/api/atlas/improvise'
+      path: '/api/atlas/improvise'
+      fullPath: '/api/atlas/improvise'
+      preLoaderRoute: typeof ApiAtlasImproviseRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
@@ -240,11 +340,16 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   ProprietesRoute: ProprietesRoute,
   SauvegardesRoute: SauvegardesRoute,
+  ParametresAleatoireRoute: ParametresAleatoireRoute,
   ParametresCarteRoute: ParametresCarteRoute,
+  ParametresCoffreRoute: ParametresCoffreRoute,
   ParametresCompteRoute: ParametresCompteRoute,
   ParametresInterfaceRoute: ParametresInterfaceRoute,
   ParametresProprietesRoute: ParametresProprietesRoute,
   ParametresIndexRoute: ParametresIndexRoute,
+  ApiAtlasCloudRoute: ApiAtlasCloudRoute,
+  ApiAtlasFilesRoute: ApiAtlasFilesRoute,
+  ApiAtlasImproviseRoute: ApiAtlasImproviseRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
 }
 export const routeTree = rootRouteImport

@@ -1,9 +1,11 @@
 import { useLayoutEffect, useRef } from "react";
+import { ButtonTips } from "@/components/atlas/button-tips";
 import { applyTheme, ensureThemeFonts } from "@/lib/theme";
 import { hydrateTheme, useThemeStore } from "@/lib/theme-store";
 import { hydratePrefs, startCloudAutosave } from "@/lib/map/prefs";
 import { hydrateSaves, startAutosave } from "@/lib/map/saves";
-import { hydrateAtlas } from "@/lib/map/store";
+import { startSessionPersist } from "@/lib/map/session-persist";
+import { ensureRoomSelected, hydrateAtlas } from "@/lib/map/store";
 import { hydrateUi } from "@/lib/map/ui";
 
 export function ThemeRoot({ children }: { children: React.ReactNode }) {
@@ -11,6 +13,7 @@ export function ThemeRoot({ children }: { children: React.ReactNode }) {
   const skipFirst = useRef(true);
 
   useLayoutEffect(() => {
+    startSessionPersist();
     hydrateTheme();
     hydrateUi();
     hydrateAtlas();
@@ -21,6 +24,7 @@ export function ThemeRoot({ children }: { children: React.ReactNode }) {
       void hydrateSaves();
       startAutosave();
       startCloudAutosave();
+      ensureRoomSelected();
       const next = useThemeStore.getState().theme;
       applyTheme(next);
       ensureThemeFonts(next);
@@ -36,5 +40,10 @@ export function ThemeRoot({ children }: { children: React.ReactNode }) {
     ensureThemeFonts(theme);
   }, [theme]);
 
-  return children;
+  return (
+    <>
+      {children}
+      <ButtonTips />
+    </>
+  );
 }

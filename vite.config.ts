@@ -142,6 +142,49 @@ function authPopupPlugin(): Plugin {
   };
 }
 
+const VITE_CLIENT_STUB = `if (typeof globalThis.process === "undefined") {
+  globalThis.process = { env: { NODE_ENV: "development", TSS_ROUTER_BASEPATH: "/" } };
+}
+export function createHotContext() {
+  return {
+    data: {},
+    accept() {},
+    dispose() {},
+    prune() {},
+    decline() {},
+    invalidate() {},
+    on() {},
+    off() {},
+    send() {},
+  };
+}
+export function injectQuery(url) { return url; }
+export function updateStyle() {}
+export function removeStyle() {}
+export function createConnection() { return { close() {} }; }
+`;
+
+/** The preview proxy hangs on Vite's real /@vite/client (it opens a websocket). */
+function stubViteClientPlugin(): Plugin {
+  return {
+    name: "atlas-stub-vite-client",
+    enforce: "pre",
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const url = (req.url ?? "").split("?", 1)[0];
+        if (url !== "/@vite/client" && url !== "/@id/@vite/client") {
+          next();
+          return;
+        }
+        res.statusCode = 200;
+        res.setHeader("content-type", "text/javascript");
+        res.setHeader("cache-control", "no-store");
+        res.end(VITE_CLIENT_STUB);
+      });
+    },
+  };
+}
+
 // `0.0.0.0:8080` is the live-preview contract — don't change host/port.
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
@@ -150,9 +193,24 @@ export default defineConfig(({ command, isPreview }) => ({
     host: "0.0.0.0",
     port: 8080,
     strictPort: true,
+    // The Grok preview proxy does not reliably upgrade Vite's HMR websocket.
+    // Waiting on that socket stalls the module graph mid-hydration — the SSR
+    // HTML is visible but every button is dead. Full reload on change instead.
+    hmr: false,
+    warmup: {
+      clientFiles: [
+        "./src/router.tsx",
+        "./src/routes/__root.tsx",
+        "./src/routes/index.tsx",
+        "./src/components/atlas/atlas-app.tsx",
+        "./src/components/atlas/floor-plan.tsx",
+        "./src/components/theme-root.tsx",
+      ],
+    },
     watch: {
       ignored: [
         "**/artifacts/**",
+        "**/atlas-cloud/**",
         "**/screenshots/**",
         "**/.vercel/**",
         "**/node_modules/**",
@@ -165,7 +223,31 @@ export default defineConfig(({ command, isPreview }) => ({
     strictPort: true,
   },
   resolve: { tsconfigPaths: true },
+  optimizeDeps: {
+    // Collapse the 80-file TanStack Router graph. Do NOT prebundle
+    // start-client — it pulls Node async_hooks into the browser and
+    // hydration dies (`AsyncLocalStorage is not a constructor`).
+    include: [
+      "react",
+      "react-dom",
+      "react-dom/client",
+      "react/jsx-runtime",
+      "react/jsx-dev-runtime",
+      "@tanstack/react-router",
+      "zustand",
+      "zustand/middleware",
+      "sonner",
+      "lucide-react",
+      "zod",
+    ],
+    exclude: [
+      "@tanstack/react-start-client",
+      "@tanstack/start-client-core",
+      "@tanstack/react-start",
+    ],
+  },
   plugins: [
+    stubViteClientPlugin(),
     pgliteBootstrapPlugin(),
     // Before tanstackStart so /auth/popup never falls through to the SPA.
     authPopupPlugin(),

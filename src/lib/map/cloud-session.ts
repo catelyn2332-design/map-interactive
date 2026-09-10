@@ -1,6 +1,10 @@
 /** Session probe for cloud copy — no Better Auth client (keeps the map light). */
 
-const BEARER_KEY = "grok-auth.bearer-token";
+import {
+  hasPersistedSession,
+  rehydrateBearer,
+} from "./session-persist";
+
 const AUTH_ON = import.meta.env.VITE_AUTH_ENABLED !== "false";
 
 let known: boolean | null =
@@ -8,6 +12,11 @@ let known: boolean | null =
     ? (import.meta.hot.data.cloudSignedIn as boolean)
     : null;
 let inflight: Promise<boolean> | null = null;
+
+if (typeof window !== "undefined") {
+  rehydrateBearer();
+  if (known === null && hasPersistedSession()) known = true;
+}
 
 export function peekCloudSession(): boolean | null {
   return known;
@@ -28,27 +37,19 @@ export function isUnauthorizedError(err: unknown): boolean {
   return message.includes("Unauthorized") || name === "UnauthorizedError";
 }
 
-function bearerToken(): string | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return window.sessionStorage.getItem(BEARER_KEY);
-  } catch {
-    return null;
-  }
-}
-
 /** True only after a live session round-trip (or a remembered signed-in flag). */
 export async function hasCloudSession(): Promise<boolean> {
   if (!AUTH_ON) {
     rememberCloudSession(false);
     return false;
   }
+  rehydrateBearer();
   if (known === true) return true;
   if (inflight) return inflight;
   inflight = (async () => {
     try {
       const headers: Record<string, string> = {};
-      const token = bearerToken();
+      const token = rehydrateBearer();
       if (token) headers.Authorization = `Bearer ${token}`;
       const ctrl = new AbortController();
       const timer = window.setTimeout(() => ctrl.abort(), 2500);
@@ -58,8 +59,17 @@ export async function hasCloudSession(): Promise<boolean> {
         signal: ctrl.signal,
       });
       window.clearTimeout(timer);
-      if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
         rememberCloudSession(false);
+        return false;
+      }
+      if (!res.ok) {
+        // Network / preview hiccup — keep a persisted account rather than
+        // flipping the visitor to signed-out mid-session.
+        if (hasPersistedSession()) {
+          rememberCloudSession(true);
+          return true;
+        }
         return false;
       }
       const data = (await res.json()) as { user?: { id?: string } } | null;
@@ -67,7 +77,10 @@ export async function hasCloudSession(): Promise<boolean> {
       rememberCloudSession(ok);
       return ok;
     } catch {
-      rememberCloudSession(false);
+      if (hasPersistedSession()) {
+        rememberCloudSession(true);
+        return true;
+      }
       return false;
     } finally {
       inflight = null;
